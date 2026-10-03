@@ -7,8 +7,9 @@
 #                          starts (`tatami autostart on` turns it back on)
 #   tatami mod on          bring the room into every Claude window: its status on the desk, room
 #                          mail, /room, and edits kept off teammates' files (`tatami mod off`)
-#   tatami hooks on        the mod, plus the same status hooks for Gemini (agy), which has no mod
-#                          (`tatami hooks off` takes Gemini's out)
+#   tatami hooks on        the mod, plus hooks for Gemini (agy) and Codex, which have no mod: their
+#                          status, and their edits kept off teammates' files (`tatami hooks off`
+#                          takes theirs out; `tatami hooks gemini|codex on|off` does one)
 #
 # The shortcuts, the app and Claude Code also run `tatami start`, `tatami hold`, `tatami window`,
 # `tatami term`, `tatami helper`, `tatami hook`, `tatami mod`, `tatami sync-app` and `tatami mcp`. The board
@@ -18,8 +19,9 @@ set -euo pipefail
 here="$(dirname "$(readlink -f "$0")")"
 case "${1:-}" in
   mcp) exec python3 "$here/tatami_mcp.py" ;;    # the team channel, which Claude Code starts
-  hook)  # what the hooks run; see hooks.py. Gemini's (agy) name their event.
+  hook)  # what the hooks run; see hooks.py. Gemini's (agy) name their event; Codex's say it on stdin.
     [ "${2:-}" = agy ] && exec python3 "$here/hooks.py" agy "${3:-}"
+    [ "${2:-}" = codex ] && exec python3 "$here/hooks.py" codex
     exec python3 "$here/hooks.py" event ;;
   mod) shift; exec python3 "$here/mod.py" "$@" ;;  # what the Claude Code mod runs; see mod.py
   hooks) exec python3 "$here/hooks.py" "${2:-}" "${3:-}" ;;

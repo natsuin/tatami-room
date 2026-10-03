@@ -419,6 +419,110 @@ class ModGuard(Team):
         self.assertTrue(poll["guarded"])
         self.assertEqual(poll["worktrees"][0]["path"], tree)
 
+    def test_gemini_is_kept_apart_too(self):
+        """Antigravity runs `tatami hook agy PreToolUse` before a tool, with the call on stdin
+        (its built-in hook docs: toolCall {name, args}; it wants a decision back)."""
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        other = subprocess.Popen(["sleep", "60"])  # a teammate's process
+        self.addCleanup(lambda: (other.kill(), other.wait()))
+        channel.save(os.path.join(channel.AGENTS, "sky.json"),
+                     {"id": "sky", "agent": "claude", "cwd": SCRATCH, "room": "fuji", "pid": other.pid,
+                      "started": channel.proc_start(other.pid), "seen": time.time(), "read_upto": {}})
+        self.agent("rose", "fuji")
+        channel.save(channel.MEMBERS, {"sky": "fuji", "rose": "fuji"})
+
+        def hook(name, args, raw=None):
+            out = subprocess.run([sys.executable, os.path.join(here, "hooks.py"), "agy", "PreToolUse"],
+                                 input=raw if raw is not None else json.dumps({"toolCall": {"name": name, "args": args},
+                                                                               "stepIdx": 3}),
+                                 capture_output=True, text=True, timeout=30)
+            return json.loads(out.stdout)
+        a = os.path.join(self.repo, "a.txt")
+        said = hook("replace_file_content", {"TargetFile": a, "TargetContent": "two", "ReplacementContent": "TWO"})
+        self.assertEqual(said["decision"], "deny")
+        self.assertIn("worktree of your own", said["reason"])
+        tree = work.tree_of("rose", self.repo)["path"]
+        self.assertEqual(hook("write_to_file", {"TargetFile": os.path.join(tree, "a.txt"), "CodeContent": "x"}), {})
+        self.assertEqual(hook("edit_file", {"target_file": a})["decision"], "deny")  # its other spelling
+        self.assertEqual(hook("view_file", {"AbsolutePath": a}), {})  # reading is fine
+        said = hook("run_command", {"CommandLine": "git commit -am x", "Cwd": self.repo})
+        self.assertIn("user's checkout", said["reason"])
+        self.assertEqual(hook("run_command", {"CommandLine": "git commit -am x", "Cwd": tree}), {})
+        self.assertEqual(hook("run_command", {"CommandLine": "ls", "Cwd": self.repo}), {})
+        work.claim("sky", "fuji", [os.path.join(self.repo, "b.txt")])
+        said = hook("write_to_file", {"TargetFile": os.path.join(tree, "b.txt"), "CodeContent": "x"})
+        self.assertIn("isn't yours to edit", said["reason"])  # sky's, in rose's worktree too
+        self.assertEqual(hook("write_to_file", {}, raw="not json"), {})  # never in Gemini's way
+
+    def test_codex_is_kept_apart_too(self):
+        """Codex runs `tatami hook codex` before a tool, with Claude Code's hook shape on stdin
+        (developers.openai.com/codex/hooks): "Bash", or "apply_patch" with the patch."""
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        other = subprocess.Popen(["sleep", "60"])  # a teammate's process
+        self.addCleanup(lambda: (other.kill(), other.wait()))
+        channel.save(os.path.join(channel.AGENTS, "sky.json"),
+                     {"id": "sky", "agent": "claude", "cwd": SCRATCH, "room": "fuji", "pid": other.pid,
+                      "started": channel.proc_start(other.pid), "seen": time.time(), "read_upto": {}})
+        self.agent("rose", "fuji")
+        channel.save(channel.MEMBERS, {"sky": "fuji", "rose": "fuji"})
+
+        def hook(name, command, cwd, event="PreToolUse"):
+            q = {"session_id": "s", "turn_id": "t", "hook_event_name": event, "cwd": cwd, "model": "gpt",
+                 "permission_mode": "default", "tool_name": name, "tool_use_id": "c1", "tool_input": {"command": command}}
+            out = subprocess.run([sys.executable, os.path.join(here, "hooks.py"), "codex"], input=json.dumps(q),
+                                 capture_output=True, text=True, timeout=30).stdout
+            said = json.loads(out)["hookSpecificOutput"] if out.strip() else None
+            if said:
+                self.assertEqual((said["hookEventName"], said["permissionDecision"]), ("PreToolUse", "deny"))
+            return said and said["permissionDecisionReason"]
+        patch = "*** Begin Patch\n*** Update File: a.txt\n@@\n one\n-two\n+TWO\n*** End Patch\n"
+        self.assertIn("worktree of your own", hook("apply_patch", patch, self.repo))
+        tree = work.tree_of("rose", self.repo)["path"]
+        self.assertIsNone(hook("apply_patch", patch, tree))  # in its own worktree: fine
+        self.assertIsNone(hook("apply_patch", patch, self.repo, event="PostToolUse"))
+        work.claim("sky", "fuji", [os.path.join(self.repo, "b.txt")])
+        two = "*** Begin Patch\n*** Add File: new.txt\n+hi\n*** Update File: b.txt\n@@\n-b\n+B\n*** End Patch\n"
+        self.assertIn("isn't yours to edit", hook("apply_patch", two, tree))  # sky's b.txt, the second file
+        moved = "*** Begin Patch\n*** Update File: new.txt\n*** Move to: b.txt\n*** End Patch\n"
+        self.assertIn("isn't yours to edit", hook("apply_patch", moved, tree))
+        self.assertIn("user's checkout", hook("Bash", "git commit -am x", self.repo))
+        self.assertIn("user's checkout", hook("Bash", ["bash", "-lc", "git commit -am x"], self.repo))
+        self.assertIsNone(hook("Bash", "git commit -am x", tree))
+        self.assertIsNone(hook("Bash", "ls", self.repo))
+        self.assertIsNone(hook("update_plan", "x", self.repo))
+
+    def test_codex_hook_installs(self):
+        path = os.path.join(SCRATCH, "codex", "hooks.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        theirs = {"matcher": "Bash", "hooks": [{"type": "command", "command": "~/audit.sh"}]}
+        channel.save(path, {"description": "mine", "hooks": {"PreToolUse": [theirs], "Stop": []}})
+        old, hooks.CODEX_HOOKS = hooks.CODEX_HOOKS, path
+        self.addCleanup(setattr, hooks, "CODEX_HOOKS", old)
+        self.assertTrue(hooks.install_codex(True))
+        self.assertTrue(hooks.install_codex(True))  # twice is still once
+        pre = channel.load(path, {})["hooks"]["PreToolUse"]
+        self.assertEqual(len(pre), 2)
+        self.assertEqual(pre[0], theirs)
+        self.assertEqual(pre[1]["matcher"], "Bash|apply_patch")
+        self.assertEqual(pre[1]["hooks"][0]["command"], '"$HOME/.local/bin/tatami" hook codex')
+        hooks.install_codex(False)
+        self.assertEqual(channel.load(path, {}), {"description": "mine", "hooks": {"PreToolUse": [theirs], "Stop": []}})
+
+    def test_gemini_hooks_install(self):
+        path = os.path.join(SCRATCH, "gemini", "config", "hooks.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        channel.save(path, {"theirs": {"Stop": []}})
+        old, hooks.AGY_HOOKS = hooks.AGY_HOOKS, path
+        self.addCleanup(setattr, hooks, "AGY_HOOKS", old)
+        self.assertTrue(hooks.install_agy(True))
+        ours = channel.load(path, {})["tatami-room"]
+        [group] = ours["PreToolUse"]
+        self.assertEqual(group["matcher"], hooks.AGY_GUARDED)
+        self.assertTrue(group["hooks"][0]["command"].endswith(" hook agy PreToolUse"))
+        self.assertEqual(sorted(ours), ["PostToolUse", "PreInvocation", "PreToolUse", "Stop"])
+        hooks.install_agy(False)
+        self.assertEqual(channel.load(path, {}), {"theirs": {"Stop": []}})
+
 
 class OnePath(unittest.TestCase):
     """Claude's status comes from the mod: the hooks earlier versions put in settings come out."""

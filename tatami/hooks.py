@@ -27,19 +27,24 @@ Code's settings. Gemini, as Antigravity's CLI (agy), has no mod, so it runs them
 ~/.gemini/config/hooks.json. Its events are named differently and don't say which one they
 are, so its command names it: before each call to the model it's working, after a tool too,
 and when its loop stops it's your turn. It has no event for asking your OK, so its card says
-"working" while it asks.
+"working" while it asks. Before it edits a file or runs a command, its PreToolUse hook asks
+the same guard the mod asks for Claude, so on a team it works in a worktree of its own and
+leaves its teammates' files alone. Codex gets that guard too, from ~/.codex/hooks.json
+(`tatami hook codex`, which reads Claude Code's hook shape).
 
-  tatami hooks on     the mod for Claude (tatami mod on), and Gemini's hooks when
-                      Antigravity is installed
-  tatami hooks off    Gemini's hooks off (tatami mod off turns Claude's part off)
-  tatami hooks gemini on|off
-                      only Gemini's
+  tatami hooks on     the mod for Claude (tatami mod on), and Gemini's and Codex's hooks
+                      when they're installed
+  tatami hooks off    Gemini's and Codex's hooks off (tatami mod off turns Claude's part off)
+  tatami hooks gemini on|off, tatami hooks codex on|off
+                      only Gemini's, or only Codex's
 
 Earlier versions put Claude's hooks in ~/.claude/settings.json; on and off both take those
 out, so the mod and the settings never both run them.
 """
 import json
 import os
+import re
+import shlex
 import sys
 import time
 
@@ -164,12 +169,36 @@ def unfinished(agent, room, status):
 AGY_HOOKS = os.path.expanduser("~/.gemini/config/hooks.json")
 AGY_EVENTS = {"PreInvocation": "UserPromptSubmit", "PostToolUse": "PostToolUse", "Stop": "Stop"}
 AGY_NAME = "tatami-room"  # our entry in its hooks.json, beside any others
+# Its tools that change a file (named as TargetFile, or target_file), and the one that runs
+# commands (CommandLine, in the folder Cwd): what its PreToolUse hook asks the guard about.
+AGY_EDITS = ("write_to_file", "edit_file", "replace_file_content", "multi_replace_file_content")
+AGY_GUARDED = "|".join(AGY_EDITS + ("run_command",))  # the hook's matcher: a regex of tool names
 
 
-def agy(name):
+def agy_guard(call):
+    """Antigravity's PreToolUse: the refusal the mod would give Claude for the same edit or
+    command (mod.guard), as a "deny" Gemini is shown with its reason. {} otherwise, which leaves
+    the tool to ask you or not as it always does: never "allow", which would skip your OK."""
+    import mod  # same folder; it imports this module, so not at the top
+    name, args = call.get("name"), call.get("args") or {}
+    if name == "run_command":
+        cmd, cwd = str(args.get("CommandLine") or ""), args.get("Cwd")
+        ask = {"tool": "Bash", "command": f"cd {shlex.quote(str(cwd))} && {cmd}" if cwd else cmd}
+    elif name in AGY_EDITS and (args.get("TargetFile") or args.get("target_file")):
+        ask = {"tool": "Edit", "path": str(args.get("TargetFile") or args.get("target_file"))}
+    else:
+        return {}
+    why = mod.guard(ask).get("deny")
+    return {"decision": "deny", "reason": why} if why else {}
+
+
+def agy(name, payload=None):
     """An Antigravity hook: note its state, and answer in its shape (it always wants a JSON
     object). Room news goes in before the model's next call, and a message to it holds up its
-    stop the way it holds up Claude's. After a tool it can't take a note, so the next call does."""
+    stop the way it holds up Claude's. After a tool it can't take a note, so the next call does.
+    Before an edit or a command, it's kept off its teammates' work the way Claude is."""
+    if name == "PreToolUse":
+        return agy_guard((payload or {}).get("toolCall") or {})
     event = {"hook_event_name": AGY_EVENTS.get(name)}
     out = record(event, tell=name != "PostToolUse") if event["hook_event_name"] else None
     if out and name == "Stop":
@@ -189,10 +218,58 @@ def install_agy(on):
     hooks.pop(AGY_NAME, None)
     if on:
         run = lambda event: {"type": "command", "command": f"{COMMAND} agy {event}", "timeout": 10}
-        hooks[AGY_NAME] = {"PreInvocation": [run("PreInvocation")],
+        hooks[AGY_NAME] = {"PreToolUse": [{"matcher": AGY_GUARDED, "hooks": [dict(run("PreToolUse"), timeout=15)]}],
+                           "PreInvocation": [run("PreInvocation")],
                            "PostToolUse": [{"matcher": "*", "hooks": [run("PostToolUse")]}],
                            "Stop": [run("Stop")]}
     channel.save(AGY_HOOKS, hooks)
+    return True
+
+
+# Codex's hooks (~/.codex/hooks.json) take Claude Code's shape. Its PreToolUse names a shell
+# command "Bash" (tool_input.command) and a file edit "apply_patch", whose tool_input.command is
+# the patch: each file it touches is on a "*** Add/Update/Delete File:" or "*** Move to:" line,
+# relative to the event's cwd.
+CODEX_HOOKS = os.path.expanduser("~/.codex/hooks.json")
+CODEX_COMMAND = f"{COMMAND} codex"
+PATCHED = re.compile(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+?)\s*$", re.M)
+
+
+def codex_guard(event):
+    """Codex's PreToolUse: the refusal the mod would give Claude for the same command or edit,
+    as Codex's deny, which it shows the model with the reason. None to let it go ahead."""
+    import mod  # same folder; it imports this module, so not at the top
+    name, given, cwd = event.get("tool_name"), event.get("tool_input"), str(event.get("cwd") or "")
+    text = given.get("command") if isinstance(given, dict) else None
+    text = shlex.join(map(str, text)) if isinstance(text, list) else str(text or "")
+    if name == "Bash":
+        asks = [{"tool": "Bash", "command": f"cd {shlex.quote(cwd)} && {text}" if cwd else text}]
+    elif name == "apply_patch":
+        asks = [{"tool": "Edit", "path": os.path.join(cwd, p)} for p in PATCHED.findall(text)]
+    else:
+        return None
+    why = next((w for w in (mod.guard(a).get("deny") for a in asks) if w), None)
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": why}} if why else None
+
+
+def install_codex(on):
+    """Our PreToolUse hook in Codex's hooks.json, when Codex is installed: added, or taken out,
+    leaving everyone else's hooks as they were."""
+    if not os.path.isdir(os.path.dirname(CODEX_HOOKS)):
+        return False
+    conf = channel.load(CODEX_HOOKS, {})
+    if not isinstance(conf, dict) or not isinstance(conf.get("hooks", {}), dict):
+        return False
+    events = conf.setdefault("hooks", {})
+    mine = lambda group: any(h.get("command", "").startswith(CODEX_COMMAND) for h in group.get("hooks", []))
+    events["PreToolUse"] = [g for g in events.get("PreToolUse", []) if not mine(g)]
+    if on:
+        events["PreToolUse"].append({"matcher": "Bash|apply_patch", "hooks": [
+            {"type": "command", "command": CODEX_COMMAND, "timeout": 15, "statusMessage": "Tatami Room"}]})
+    if not events["PreToolUse"]:
+        events.pop("PreToolUse")
+    channel.save(CODEX_HOOKS, conf)
     return True
 
 
@@ -236,16 +313,17 @@ def install(on):
     """tatami hooks on|off: the mod for Claude (on only), Gemini's hooks, and the old settings
     hooks out either way."""
     removed = remove_settings_hooks()
-    gemini = install_agy(on)
+    gemini, codex = install_agy(on), install_codex(on)
     old = " (and took the old Tatami hooks out of Claude Code's settings)" if removed else ""
+    others = " and ".join(n for n, did in (("Gemini's", gemini), ("Codex's", codex)) if did)
     if on:
         import mod  # same folder; it imports this module, so not at the top
         mod.switch(True)
         print("Claude's status reaches the desk through the Tatami Room mod" + old + "."
-              + (" Gemini's hooks are on too, from its next start." if gemini else ""))
+              + (f" {others} hooks are on too, from their next start." if others else ""))
     else:
-        print(("Gemini's Tatami Room hooks are off." if gemini else "There are no Gemini hooks here.") + old
-              + " Claude's status comes from the mod: tatami mod off turns that off.")
+        print((f"{others} Tatami Room hooks are off." if others else "There are no Gemini or Codex hooks here.")
+              + old + " Claude's status comes from the mod: tatami mod off turns that off.")
 
 
 def main():
@@ -260,11 +338,27 @@ def main():
         return
     if cmd == "agy":  # Antigravity's: `tatami hook agy <event>`, the event's details on stdin
         try:
-            sys.stdin.read()
-            out = agy(sys.argv[2] if len(sys.argv) > 2 else "")
+            text = sys.stdin.read()
+            out = agy(sys.argv[2] if len(sys.argv) > 2 else "", json.loads(text) if text.strip() else {})
         except Exception:  # never get in Gemini's way either
             out = {}
         print(json.dumps(out))
+        return
+    if cmd == "codex" and sys.argv[2:3] not in (["on"], ["off"]):  # Codex's: `tatami hook codex`
+        try:
+            event = json.load(sys.stdin)
+            out = codex_guard(event) if event.get("hook_event_name") == "PreToolUse" else None
+        except Exception:  # never get in Codex's way
+            out = None
+        if out:
+            print(json.dumps(out))
+        return
+    if cmd == "codex":
+        on = sys.argv[2] == "on"
+        if not install_codex(on):
+            sys.exit("Codex isn't set up here: there's no ~/.codex (or its hooks.json isn't one Tatami can add to).")
+        print("Codex's Tatami Room hook is on: from its next start, on a team it works in a worktree of its own and "
+              "leaves its teammates' files alone." if on else "Codex's Tatami Room hook is off.")
         return
     if cmd in ("on", "off"):
         install(cmd == "on")
