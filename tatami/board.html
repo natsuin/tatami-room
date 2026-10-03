@@ -164,25 +164,6 @@ h1 { margin: 0; font: 650 1.2rem/1 var(--display); letter-spacing: -.02em; white
 .usage-text span[data-level="high"] em { color: var(--kaki); }
 .usage-text span[data-level="full"] em { color: var(--beni); }
 
-.newroom { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; }
-.newroom input {
-  flex: 0 1 auto;
-  min-width: 0;
-  width: 0;
-  padding: 8px 0;
-  opacity: 0;
-  border: 0;
-  border-radius: 999px;
-  background: rgba(255, 228, 244, .07);
-  box-shadow: inset 0 0 0 1px rgba(255, 228, 244, .1);
-  font-size: .86rem;
-  transition: width .5s var(--bounce), padding .5s var(--glide), opacity .2s ease, box-shadow .2s ease;
-}
-.newroom input::placeholder { color: var(--muted); }
-.newroom input:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--sakura) 70%, transparent), 0 0 0 4px rgba(255, 133, 192, .14); }
-.newroom.is-open input { width: 190px; min-width: 72px; padding: 8px 15px; opacity: 1; }
-.newroom.shake input { animation: shake .42s var(--glide); }
-@keyframes shake { 20% { translate: -6px 0; } 40% { translate: 5px 0; } 60% { translate: -3px 0; } 80% { translate: 2px 0; } }
 .add {
   flex: none;
   padding: 8px 17px;
@@ -203,21 +184,91 @@ h1 { margin: 0; font: 650 1.2rem/1 var(--display); letter-spacing: -.02em; white
 .add:active { scale: .93; transition-duration: .1s; }
 .add.quiet { background: rgba(255, 228, 244, .08); color: var(--text); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06); }
 .add.quiet:hover { background: rgba(255, 228, 244, .13); filter: none; }
-/* + Gemini and the other kinds of agent: beside + Claude, quieter, in their maker's colour and
-   with its mark. */
-.more-agents { display: contents; }
-.add.maker-add {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding-left: 14px;
-  background: color-mix(in srgb, var(--maker) 16%, rgba(255, 228, 244, .05));
-  color: color-mix(in srgb, var(--maker) 45%, white);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--maker) 34%, transparent), 0 10px 24px -14px var(--maker);
+
+/* The + button: everything the desk can add, in one menu. A room on top, set apart by a line,
+   then each kind of agent it can start, with its maker's mark and colour. Room asks for the
+   name right there in the menu. The + turns to a × while it's open. */
+.addctl { position: relative; flex: none; }
+.add-button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ff9fcf, var(--sakura));
+  color: var(--sakura-ink);
+  cursor: pointer;
+  box-shadow: 0 10px 24px -12px rgba(255, 133, 192, .95), inset 0 1px 0 rgba(255, 255, 255, .4);
+  transition: scale .5s var(--bounce), filter .2s ease, box-shadow .3s ease;
 }
-.add.maker-add:hover { filter: none; background: color-mix(in srgb, var(--maker) 26%, rgba(255, 228, 244, .05));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--maker) 55%, transparent), 0 12px 28px -12px var(--maker); }
-.add.maker-add .mark { width: 12px; height: 12px; }
+.add-button:hover { filter: brightness(1.06); box-shadow: 0 12px 30px -10px rgba(255, 133, 192, 1), inset 0 1px 0 rgba(255, 255, 255, .4); }
+.add-button:active { scale: .9; transition-duration: .1s; }
+.add-button svg { width: 16px; height: 16px; transition: rotate .45s var(--bounce); }
+.add-button path { fill: none; stroke: currentColor; stroke-width: 2.3; stroke-linecap: round; }
+.add-button[aria-expanded="true"] svg { rotate: 135deg; }
+.add-menu {
+  position: absolute;
+  top: calc(100% + 20px);   /* clear of the bar, like the sky's panel */
+  right: 0;
+  z-index: 12;
+  width: 248px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding: 6px;
+  border-radius: 20px;
+  background: rgba(30, 22, 39, .97);
+  box-shadow: inset 0 0 0 1px rgba(255, 228, 244, .1), 0 30px 60px -24px rgba(0, 0, 0, .95);
+  -webkit-app-region: no-drag;
+}
+.add-menu[hidden] { display: none; }
+.add-menu hr { margin: 4px 10px; border: 0; border-top: 1px solid rgba(255, 228, 244, .1); }
+.agent-items { display: grid; gap: 2px; }
+.add-item {
+  --maker: var(--sakura);
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  font-size: .88rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background .2s ease, box-shadow .2s ease;
+}
+.add-item:hover, .add-item:focus-visible { background: color-mix(in srgb, var(--maker) 14%, rgba(255, 228, 244, .04)); }
+.add-item:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--maker) 60%, transparent); }
+.add-item:active { background: color-mix(in srgb, var(--maker) 22%, rgba(255, 228, 244, .04)); }
+.add-item > svg { flex: none; width: 18px; height: 18px; }
+.add-item .mark { width: 15px; height: 15px; margin: 0 1.5px; }
+.add-item .mark.line path { stroke-width: 2.2; }
+.newroom { display: grid; }
+.newroom.is-open #room-button, .newroom:not(.is-open) .room-field { display: none; }
+.room-field { display: flex; gap: 6px; padding: 3px; animation: field-in .35s var(--glide); }
+@keyframes field-in { from { opacity: 0; scale: .97; } }
+.room-field input {
+  flex: 1;
+  width: 0;
+  padding: 7px 13px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 228, 244, .07);
+  box-shadow: inset 0 0 0 1px rgba(255, 228, 244, .1);
+  font-size: .86rem;
+  transition: box-shadow .2s ease;
+}
+.room-field input::placeholder { color: var(--muted); }
+.room-field input:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--sakura) 70%, transparent), 0 0 0 4px rgba(255, 133, 192, .14); }
+.room-field .add { padding: 7px 13px; }
+.newroom.shake input { animation: shake .42s var(--glide); }
+@keyframes shake { 20% { translate: -6px 0; } 40% { translate: 5px 0; } 60% { translate: -3px 0; } 80% { translate: 2px 0; } }
 
 /* The sky's button: the season's character, opening a small panel to pick the season and how
    much falls. The panel is nearly opaque: inside the bar's frosted glass it can't frost too. */
@@ -283,31 +334,17 @@ h1 { margin: 0; font: 650 1.2rem/1 var(--display); letter-spacing: -.02em; white
 .sky-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: .84rem; cursor: pointer; }
 .sky-toggle input { width: 16px; height: 16px; margin: 0; accent-color: var(--sakura); }
 /* When the bar runs short, the usage words give way first (the rings stay), then the summary,
-   the title, the rings and the mark, and last the name box narrows: the buttons never slide under
-   the window's own. Naming a room needs more room, so it makes way sooner. */
-@container bar (max-width: 930px) {
-  .bar:has(.newroom.is-open) .usage-text { max-width: 0; opacity: 0; }
-}
+   the title, and last the rings and the sky's button: the + never slides under the window's own. */
 @container bar (max-width: 760px) {
   .summary { display: none; }
   .usage-text { max-width: 0; opacity: 0; }
 }
-@container bar (max-width: 680px) {
-  .bar:has(.newroom.is-open) h1 { display: none; }
-}
-@container bar (max-width: 600px) {   /* the sky's button gives way: the buttons keep to the right */
-  .bar:has(.newroom.is-open) .skyctl { display: none; }
-  .bar:has(.newroom.is-open) .newroom { margin-left: auto; }
-}
-@container bar (max-width: 520px) {
-  .bar:has(.newroom.is-open) .usage { display: none; }
-}
 @container bar (max-width: 480px) {
   h1 { display: none; }
 }
-@container bar (max-width: 420px) {
-  .usage, .skyctl, .bar:has(.newroom.is-open) .brand { display: none; }
-  .newroom { margin-left: auto; }
+@container bar (max-width: 300px) {
+  .usage, .skyctl { display: none; }
+  .addctl { margin-left: auto; }
 }
 
 /* ---- sections: agents on their own along the top, then a stage per room ---- */
@@ -1080,12 +1117,25 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
       </div>
     </div>
   </div>
-  <form class="newroom" id="newroom" autocomplete="off">
-    <input id="roomname" maxlength="60" spellcheck="false" placeholder="Name the room" aria-label="New room name" tabindex="-1">
-    <button class="add quiet" id="room-button" type="submit">+ Room</button>
-    <span class="more-agents" id="more-agents"></span>
-    <a class="add" id="new-claude" href="tatami-room:new" title="Open a new Claude window">+ Claude</a>
-  </form>
+  <div class="addctl" id="addctl">
+    <button class="add-button" id="add-button" type="button" aria-expanded="false" aria-controls="add-menu"
+            aria-label="Add a room or an agent" title="Add a room or an agent">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11"/></svg>
+    </button>
+    <div class="add-menu" id="add-menu" hidden>
+      <form class="newroom" id="newroom" autocomplete="off">
+        <button class="add-item" id="room-button" type="button" title="Make a room to team agents up in">
+          <svg aria-hidden="true"><use href="#mark"/></svg>Room
+        </button>
+        <div class="room-field">
+          <input id="roomname" maxlength="60" spellcheck="false" placeholder="Name the room" aria-label="New room name">
+          <button class="add" type="submit">Create</button>
+        </div>
+      </form>
+      <hr>
+      <div class="agent-items" id="agent-items" role="group" aria-label="Start an agent"></div>
+    </div>
+  </div>
 </header>
 
 <section class="lobby" id="lobby" aria-labelledby="lobby-title" hidden>
@@ -1100,8 +1150,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 <section class="empty" id="empty" hidden>
   <svg aria-hidden="true"><use href="#mark"/></svg>
   <h2>No agents yet</h2>
-  <p>Press + Claude to start one. Every Claude window shows up here, on its own until you drag it
-     onto another.</p>
+  <p>Press + and choose Claude to start one. Every Claude window shows up here, on its own until
+     you drag it onto another.</p>
 </section>
 
 <p class="toast" id="toast" role="status" hidden></p>
@@ -1181,7 +1231,6 @@ APP?.onPanel?.((width) => {   // the desk makes room for the terminal panel, and
   sky.resize();   // and the moon and branch move over with it
   skyPlace();     // and so does the sky's panel, if it's open
 });
-if (APP) document.getElementById("new-claude").title = "Start Claude in a terminal beside the desk";
 // Who made each kind of agent: its name on the card, and a small mark in its colour. They come
 // from kinds.json, where a new kind of agent is added: { claude: { name, color, line, d }, ... }.
 const MAKERS = __MAKERS__;
@@ -3112,22 +3161,50 @@ async function jump(card) {
   if (await APP.focus(card.dataset.id) === 2) toast("This agent has no window of its own to bring up.");
 }
 
-$("#new-claude").addEventListener("click", (e) => {
-  e.preventDefault();
-  if (APP) APP.newClaude(); else go("tatami-room:new");
+// ---- the + button ----
+
+// One menu for everything the desk can add: a room on top, then the agents. Outside it, or
+// Escape, closes it; the arrow keys go up and down it.
+const addButton = $("#add-button"), addMenu = $("#add-menu");
+function addOpen(open, focus) {
+  if (open === !addMenu.hidden) return;
+  if (!open && addMenu.contains(document.activeElement)) addButton.focus();   // not lost with the menu
+  addMenu.hidden = !open;
+  addButton.setAttribute("aria-expanded", String(open));
+  if (!open) return closeForm();
+  if (focus) $(".add-item", addMenu).focus();
+  if (!REDUCED) {
+    addMenu.animate([{ opacity: 0, transform: "translateY(-8px) scale(.96)" }, { opacity: 1, transform: "none" }],
+                    { duration: 460, easing: BOUNCE });
+  }
+}
+addButton.addEventListener("click", (e) => addOpen(addMenu.hidden, e.detail === 0));   // from the keyboard: into the menu
+document.addEventListener("pointerdown", (e) => { if (!addMenu.hidden && !e.target.closest?.("#addctl")) addOpen(false); });
+$("#addctl").addEventListener("keydown", (e) => {
+  if (addMenu.hidden) return;
+  if (e.key === "Escape") {
+    e.preventDefault();
+    if (form.classList.contains("is-open")) { closeForm(); roomButton.focus(); }   // back to the menu
+    else { addOpen(false); addButton.focus(); }
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const items = [...addMenu.querySelectorAll(".add-item")].filter((b) => b.offsetParent);
+    const i = items.indexOf(document.activeElement), step = e.key === "ArrowDown" ? 1 : -1;
+    items.at(i < 0 ? (step > 0 ? 0 : -1) : (i + step) % items.length)?.focus();
+  }
 });
 
-// + Gemini, + Codex: each other kind of agent in kinds.json that's installed, started in a
-// terminal of the app's own like + Claude. Only the app can: a browser's links only know Claude
-// windows, and so does an app from before it could start other agents.
+// The agents: Claude, then each other kind of agent in kinds.json that's installed (Gemini,
+// Codex), started in a terminal of the app's own. Only the app can start those: a browser's
+// links only know Claude windows, and so does an app from before it could start other agents.
 let offered = null;
 function offerKinds(s) {
-  const kinds = APP?.newAgent ? (s.installed || []).filter((k) => k !== "claude" && MAKERS[k]) : [];
+  const kinds = ["claude", ...(APP?.newAgent ? (s.installed || []).filter((k) => k !== "claude" && MAKERS[k]) : [])];
   if (kinds.join() === offered) return;
   offered = kinds.join();
   const svg = "http://www.w3.org/2000/svg";
-  $("#more-agents").replaceChildren(...kinds.map((kind) => {
-    const maker = MAKERS[kind], button = document.createElement("button");
+  $("#agent-items").replaceChildren(...kinds.map((kind) => {
+    const maker = MAKERS[kind] || { name: "Claude" }, button = document.createElement("button");
     const mark = document.createElementNS(svg, "svg"), path = document.createElementNS(svg, "path");
     mark.setAttribute("viewBox", "-12 -12 24 24");
     mark.setAttribute("aria-hidden", "true");
@@ -3136,39 +3213,41 @@ function offerKinds(s) {
     path.setAttribute("d", (maker.d ? maker : OTHER_MARK).d);
     mark.append(path);
     button.type = "button";
-    button.className = "add maker-add";
+    button.className = "add-item";
     button.dataset.kind = kind;
-    button.title = `Start ${maker.name} in a terminal beside the desk`;
+    button.title = APP ? `Start ${maker.name} in a terminal beside the desk` : `Open a new ${maker.name} window`;
     if (maker.color) button.style.setProperty("--maker", maker.color);
-    button.append(mark, `+ ${maker.name}`);
+    button.append(mark, maker.name);
     return button;
   }));
 }
-$("#more-agents").addEventListener("click", (e) => {
-  const button = e.target.closest("[data-kind]");
-  if (button) APP.newAgent(button.dataset.kind);
+offerKinds({});   // Claude, until the board says what else is installed
+$("#agent-items").addEventListener("click", (e) => {
+  const kind = e.target.closest("[data-kind]")?.dataset.kind;
+  if (!kind) return;
+  addOpen(false);
+  if (kind !== "claude") APP.newAgent(kind);
+  else if (APP) APP.newClaude();
+  else go("tatami-room:new");
 });
 
 // ---- rooms, messages, notices ----
 
-// + Room opens a name box beside it and becomes Create. Create with no name nudges the box;
-// Escape, or leaving it empty, closes it again.
+// Room, in the + menu, becomes a name box and Create. Create with no name nudges the box;
+// Escape, or leaving it empty, turns it back.
 const form = $("#newroom"), input = $("#roomname"), roomButton = $("#room-button");
+roomButton.addEventListener("click", () => {
+  form.classList.add("is-open");
+  input.focus();
+});
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (!form.classList.contains("is-open")) {
-    form.classList.add("is-open");
-    roomButton.textContent = "Create";
-    input.tabIndex = 0;
-    input.focus();
-    return;
-  }
   const name = input.value.trim();
   if (!name) return nudge();
   if (!/[\p{L}\p{N}]/u.test(name)) return nudge("A room name needs at least one letter or number.");
   const before = new Set(roomEls.keys());
   if (await change("/api/room", { room: name })) {
-    closeForm();
+    addOpen(false);
     const made = [...roomEls.keys()].find((k) => !before.has(k));
     const el = roomEls.get(made);
     if (el) {
@@ -3178,9 +3257,8 @@ form.addEventListener("submit", async (e) => {
     }
   }
 });
-input.addEventListener("keydown", (e) => { if (e.key === "Escape") closeForm(); });
 input.addEventListener("blur", () => setTimeout(() => {
-  if (!input.value.trim() && document.activeElement !== input) closeForm();
+  if (!input.value.trim() && !form.contains(document.activeElement)) closeForm();
 }, 150));
 function nudge(msg) {
   form.classList.remove("shake");
@@ -3192,9 +3270,7 @@ function nudge(msg) {
 form.addEventListener("animationend", () => form.classList.remove("shake"));
 function closeForm() {
   form.classList.remove("is-open");
-  roomButton.textContent = "+ Room";
   input.value = "";
-  input.tabIndex = -1;
 }
 
 roomsEl.addEventListener("click", (e) => {   // the arrow: open or fold away a room's chat
