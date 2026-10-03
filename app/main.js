@@ -154,6 +154,7 @@ let queued = [];
 let shown = null;             // the session in the panel, while it's open
 let panelWidth = null;        // set by dragging its edge; until then, a share of the window
 let lastShown = null;         // for Ctrl+`, which goes back to it
+let tucked = false;           // put away under a picture of it on the desk, while a menu from the bar is open
 
 const END = "\x1b]7373;end\x07";  // what tells a terminal's holder to stop its agent
 const KEEP = "\x1b]7373;keep\x07";  // and that it should keep it while the app is away
@@ -239,8 +240,8 @@ function layout(slide = false) {
   const width = shown ? Math.max(0, Math.min(w - 300, Math.max(360, wanted))) : 0;
   const place = (x) => panel.setBounds({ x, y: HEAD, width, height: Math.max(0, h - HEAD) });
   clearInterval(sliding);
-  panel.setVisible(!!shown);
-  win.webContents.send("tatami:panel", width);
+  panel.setVisible(!!shown && !tucked);
+  win.webContents.send("tatami:panel", width, tucked);
   if (!slide || !width) return place(w - width);
   const start = Date.now();
   place(w);
@@ -264,6 +265,7 @@ function showSession(key) {
   showDesk();
   const opening = !shown;
   shown = lastShown = key;
+  tucked = false;
   layout(opening);
   toPanel("term:show", key, lookOf(key));
   panel.webContents.focus();
@@ -271,6 +273,7 @@ function showSession(key) {
 
 function hidePanel() {
   shown = null;
+  tucked = false;
   layout();
   win.webContents.focus();
 }
@@ -293,6 +296,20 @@ function reloadKey(event, input) {
 function fromPanel(event) {
   return panel && event.sender === panel.webContents;
 }
+
+// The panel is drawn over the desk, above anything the page draws, so a menu dropping from the
+// desk's bar would open behind it. Instead the desk puts up a picture of the panel (a JPEG of it
+// now, as a data: URL, which the desk's page may show), and the real one is put away under it
+// while the menu is open: the menu opens over it.
+ipcMain.handle("tatami:panel-picture", async (event) => {
+  if (!fromBoard(event) || !panel || !shown || tucked) return null;
+  return "data:image/jpeg;base64," + (await panel.webContents.capturePage()).toJPEG(90).toString("base64");
+});
+ipcMain.on("tatami:tuck", (event, on) => {
+  if (!fromBoard(event) || !panel) return;
+  tucked = !!on && !!shown;
+  panel.setVisible(!!shown && !tucked);
+});
 
 ipcMain.on("term:input", (e, key, data) => { if (fromPanel(e)) sessions.get(key)?.proc.stdin.write(String(data)); });
 ipcMain.on("term:binary", (e, key, data) => { if (fromPanel(e)) sessions.get(key)?.proc.stdin.write(Buffer.from(String(data), "latin1")); });

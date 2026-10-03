@@ -111,6 +111,20 @@ button, input { font: inherit; color: inherit; }
 .app .bar a, .app .bar button, .app .bar input { -webkit-app-region: no-drag; }
 /* ...and the panel takes the right side under the bar: the desk makes room. */
 .app main, .app .lobby, .app .empty { margin-right: var(--panel, 0px); }
+/* A picture of the panel, in its place while a menu from the bar opens over it (coverPanel).
+   Under the bar and its menus, over the petals, as the panel is. */
+.under {
+  position: fixed;
+  top: 64px;
+  right: 0;
+  z-index: 10;
+  width: var(--panel, 0px);
+  height: calc(100% - 64px);
+  background: #110c17;
+  transition: filter .16s ease;
+}
+.under[hidden] { display: none; }
+.under.dim { filter: brightness(.74); }
 .brand { display: flex; align-items: center; gap: 11px; flex: none; }
 .brand svg { width: 26px; height: 26px; flex: none; transition: translate .6s var(--bounce); }
 .brand:hover svg { translate: 0 -3px; }   /* the mats hop up a step */
@@ -222,8 +236,6 @@ h1 { margin: 0; font: 650 1.2rem/1 var(--display); letter-spacing: -.02em; white
   background: rgba(30, 22, 39, .97);
   box-shadow: inset 0 0 0 1px rgba(255, 228, 244, .1), 0 30px 60px -24px rgba(0, 0, 0, .95);
   -webkit-app-region: no-drag;
-  translate: var(--shift, 0px) 0;   /* left of the terminal panel while one is open (addPlace) */
-  transition: translate .45s var(--glide);
 }
 .add-menu[hidden] { display: none; }
 .add-menu hr { margin: 4px 10px; border: 0; border-top: 1px solid rgba(255, 228, 244, .1); }
@@ -306,8 +318,6 @@ h1 { margin: 0; font: 650 1.2rem/1 var(--display); letter-spacing: -.02em; white
   background: rgba(30, 22, 39, .97);
   box-shadow: inset 0 0 0 1px rgba(255, 228, 244, .1), 0 30px 60px -24px rgba(0, 0, 0, .95);
   -webkit-app-region: no-drag;
-  translate: var(--shift, 0px) 0;   /* left of the terminal panel while one is open (skyPlace) */
-  transition: translate .45s var(--glide);
 }
 .sky-panel[hidden] { display: none; }
 .sky-moon { margin: 0; display: flex; align-items: baseline; gap: 9px; color: var(--muted); font-size: .8rem; }
@@ -1076,6 +1086,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
   <canvas id="sky-back"></canvas>
 </div>
 <canvas class="sky-front" id="sky-front" aria-hidden="true"></canvas>
+<img class="under" id="under" alt="" hidden>
 
 <header class="bar">
   <div class="brand">
@@ -1226,13 +1237,12 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 const TOKEN = "__TOKEN__";
 const APP = window.tatami;   // set inside the Tatami Room app (its preload.js); absent in a browser
 if (APP) document.documentElement.classList.add("app");
-APP?.onPanel?.((width) => {   // the desk makes room for the terminal panel, and its cards glide over
+APP?.onPanel?.((width, held) => {   // the desk makes room for the terminal panel, and its cards glide over
   const at = snapshot();
   document.documentElement.style.setProperty("--panel", `${width}px`);
   glide(at);
   sky.resize();   // and the moon and branch move over with it
-  skyPlace();     // and so does the sky's panel, if it's open
-  addPlace();     // and the + menu
+  if (!held) panelBack(width);
 });
 // Who made each kind of agent: its name on the card, and a small mark in its colour. They come
 // from kinds.json, where a new kind of agent is added: { claude: { name, color, line, d }, ... }.
@@ -3164,6 +3174,54 @@ async function jump(card) {
   if (await APP.focus(card.dataset.id) === 2) toast("This agent has no window of its own to bring up.");
 }
 
+// ---- the menus from the bar, over the terminal ----
+
+// The app draws its terminal panel over the desk's right side, above anything the page draws, and
+// the + menu and the sky's panel drop from the bar right there. So while one is open the desk puts
+// a picture of the terminal in its place, dimmed, and the app puts the real one away under it: the
+// menu opens over the terminal. As it closes, the picture brightens and the terminal comes back.
+// Clicking the picture closes the menu, as clicking anywhere outside it does.
+const under = $("#under"), pause = (ms) => new Promise((go) => setTimeout(go, ms));
+let covering = false, tucked = false, coverTurn = 0;
+async function coverPanel() {
+  const want = !addMenu.hidden || !skyPanel.hidden;
+  if (want === covering || !APP?.panelPicture) return;
+  covering = want;
+  const turn = ++coverTurn, still = () => turn === coverTurn;
+  if (!want) {
+    under.classList.remove("dim");
+    await pause(REDUCED ? 0 : 160);
+    if (!still()) return;
+    if (tucked) APP.tuckPanel(false);
+    tucked = false;
+    await pause(120);   // the terminal is back over it by then
+    if (still()) under.hidden = true;
+    return;
+  }
+  if (!tucked) {
+    const picture = await APP.panelPicture();   // none while no terminal is open
+    if (!String(picture).startsWith("data:image/jpeg;base64,") || !still()) return;
+    under.src = picture;
+    await under.decode().catch(() => {});
+    if (!still()) return;
+    under.hidden = false;
+    await new Promise((painted) => requestAnimationFrame(() => requestAnimationFrame(painted)));
+    if (!still()) return;
+    APP.tuckPanel(true);
+    tucked = true;
+  }
+  under.classList.add("dim");
+}
+// The app brought the terminal back itself (Ctrl+`, or you picked an agent's terminal): you went
+// to it, so the menus close.
+function panelBack(width) {
+  if (!tucked && !(covering && width)) return;
+  tucked = false;
+  under.hidden = true;
+  addOpen(false);
+  skyOpen(false);
+}
+
 // ---- the + button ----
 
 // One menu for everything the desk can add: a room on top, then the agents. Outside it, or
@@ -3174,15 +3232,14 @@ function addOpen(open, focus) {
   if (!open && addMenu.contains(document.activeElement)) addButton.focus();   // not lost with the menu
   addMenu.hidden = !open;
   addButton.setAttribute("aria-expanded", String(open));
+  coverPanel();
   if (!open) return closeForm();
-  addPlace();
   if (focus) $(".add-item", addMenu).focus();
   if (!REDUCED) {
     addMenu.animate([{ opacity: 0, transform: "translateY(-8px) scale(.96)" }, { opacity: 1, transform: "none" }],
                     { duration: 460, easing: BOUNCE });
   }
 }
-function addPlace() { clearOfPanel(addMenu, addButton, 248); }
 addButton.addEventListener("click", (e) => addOpen(addMenu.hidden, e.detail === 0));   // from the keyboard: into the menu
 document.addEventListener("pointerdown", (e) => { if (!addMenu.hidden && !e.target.closest?.("#addctl")) addOpen(false); });
 $("#addctl").addEventListener("keydown", (e) => {
@@ -3336,6 +3393,7 @@ function skyOpen(open) {
   if (open === !skyPanel.hidden) return;
   skyPanel.hidden = !open;
   skyButton.setAttribute("aria-expanded", String(open));
+  coverPanel();
   if (!open) return;
   const m = sky.moon(), name = document.createElement("b");
   name.lang = "ja";
@@ -3343,24 +3401,11 @@ function skyOpen(open) {
   $("#sky-moon").replaceChildren(name, `${m.en}, ${m.lit}% lit tonight`);
   for (const r of skyPanel.querySelectorAll("input[type=radio]")) r.checked = sky.prefs[r.name] === r.value;
   $("#sky-branch-toggle").checked = sky.prefs.branch;
-  skyPlace();
   if (!REDUCED) {
     skyPanel.animate([{ opacity: 0, transform: "translateY(-8px) scale(.96)" }, { opacity: 1, transform: "none" }],
                      { duration: 460, easing: BOUNCE });
   }
 }
-// The app draws its terminal panel over the desk's right side, so with one open a panel that drops
-// from the bar (the sky's, the + menu) moves left until it clears it, narrowing if it must, and
-// glides along as the terminal comes and goes. Clicks in the terminal don't reach the desk, so it
-// stays open while you work there.
-function clearOfPanel(menu, anchor, width) {
-  if (menu.hidden) return;
-  const panel = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel")) || 0;
-  const edge = anchor.getBoundingClientRect().right, right = Math.min(edge, innerWidth - panel - 16);
-  menu.style.setProperty("--shift", `${right - edge}px`);
-  menu.style.width = right - 16 < width ? `${Math.max(240, right - 16)}px` : "";
-}
-function skyPlace() { clearOfPanel(skyPanel, $("#skyctl"), 304); }
 skyButton.addEventListener("click", () => skyOpen(skyPanel.hidden));
 document.addEventListener("pointerdown", (e) => { if (!skyPanel.hidden && !e.target.closest?.("#skyctl")) skyOpen(false); });
 $("#skyctl").addEventListener("keydown", (e) => {
