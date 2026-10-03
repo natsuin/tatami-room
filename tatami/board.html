@@ -740,11 +740,16 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 /* ---- the room's plan: its tasks, who has each, and the files they hold ---- */
 /* Under the cards, above the chat. A task's dot says how far it has got, without moving: a
    ring while it waits for someone, wisteria while it's being done, red while it's stuck, sky
-   blue once it's done and waiting to land in your checkout. Landed ones fade. */
+   blue once it's done and waiting to land in your checkout. Landed ones fade. It folds away
+   under its "Plan" row like the chat does (the toggle's look is the chat's, below), but starts
+   open; folded, the row still says what's left and how far along it is. */
 .plan { margin: 14px 2px 0; contain: inline-size; }
 .plan[hidden] { display: none; }
-.plan-head { display: flex; align-items: center; gap: 10px; padding: 0 10px 6px; color: var(--muted); font: 500 .78rem/1.2 var(--ui); }
 .plan-name { flex: none; color: var(--text); font-weight: 650; }
+.plan.is-open .plan-name { color: color-mix(in srgb, var(--room) 45%, var(--text)); }
+.plan-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s var(--glide); }
+.plan.is-open .plan-body { grid-template-rows: 1fr; }
+.plan-fold { min-height: 0; overflow: hidden; }   /* folds all the way shut */
 .plan-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plan-bar { flex: 0 1 120px; height: 4px; margin-left: auto; border-radius: 999px; background: rgba(255, 255, 255, .07); overflow: hidden; }
 .plan-bar i {
@@ -784,7 +789,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 .task .note:empty { display: none; }
 .task[data-status="blocked"] .note { color: color-mix(in srgb, var(--aka) 55%, var(--text)); }
 .task[data-status="done"] .note { color: color-mix(in srgb, var(--sora) 60%, var(--muted)); }
-.held { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px 0; color: var(--muted); font-size: .74rem; }
+.held { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px 4px; color: var(--muted); font-size: .74rem; }
 .held:empty { display: none; }
 .hold {
   --who: var(--fuji);
@@ -818,7 +823,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 /* Folded away under a "Room chat" row until you open it. Open, it's a short box that scrolls,
    opened at the newest message; an edge fades while there's more beyond it. */
 .chat { margin: 14px 2px 0; contain: inline-size; }   /* as wide as the cards, never wider */
-.chat-toggle {
+.chat-toggle, .plan-toggle {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -834,12 +839,12 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
   cursor: pointer;
   transition: background .2s ease, color .2s ease;
 }
-.chat-toggle:hover { background: rgba(255, 255, 255, .05); color: var(--text); }
+.chat-toggle:hover, .plan-toggle:hover { background: rgba(255, 255, 255, .05); color: var(--text); }
 .chat-toggle:disabled { cursor: default; background: none; color: var(--muted); }
-.chat-toggle .chev { flex: none; width: 10px; height: 10px; transition: rotate .4s var(--bounce); }
-.chat-toggle .chev path { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.chat-toggle .chev, .plan-toggle .chev { flex: none; width: 10px; height: 10px; transition: rotate .4s var(--bounce); }
+.chat-toggle .chev path, .plan-toggle .chev path { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .chat-toggle:disabled .chev { opacity: .35; }
-.chat.is-open .chev { rotate: 90deg; }
+.chat.is-open .chev, .plan.is-open .chev { rotate: 90deg; }
 .chat-name { flex: none; color: var(--text); font-weight: 650; }
 .chat-toggle:disabled .chat-name { color: var(--muted); }
 .chat-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1117,9 +1122,18 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
       <div class="fx"></div>
       <div class="cards" role="list"></div>
       <div class="plan" hidden>
-        <div class="plan-head"><span class="plan-name">Plan</span><span class="plan-meta"></span><span class="plan-bar" aria-hidden="true"><i></i></span></div>
-        <ol class="tasks"></ol>
-        <div class="held" aria-label="Files the agents are working on"></div>
+        <button class="plan-toggle" type="button" aria-expanded="false">
+          <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M3.5 1.5 7 5 3.5 8.5"/></svg>
+          <span class="plan-name">Plan</span>
+          <span class="plan-meta"></span>
+          <span class="plan-bar" aria-hidden="true"><i></i></span>
+        </button>
+        <div class="plan-body" inert>
+          <div class="plan-fold">
+            <ol class="tasks"></ol>
+            <div class="held" aria-label="Files the agents are working on"></div>
+          </div>
+        </div>
       </div>
       <div class="chat">
         <button class="chat-toggle" type="button" aria-expanded="false">
@@ -1196,6 +1210,9 @@ const agentEls = new Map();   // agent id -> its card, kept between updates (mov
 // Rooms whose chat you've opened, remembered by this desk. Chats start folded away.
 const chatOpen = new Set((() => { try { return JSON.parse(localStorage.getItem("tatami-chats")) || []; } catch { return []; } })());
 const keepChats = () => { try { localStorage.setItem("tatami-chats", JSON.stringify([...chatOpen])); } catch { /* private window */ } };
+// Rooms whose plan you've folded away. Plans start open.
+const planShut = new Set((() => { try { return JSON.parse(localStorage.getItem("tatami-plans-shut")) || []; } catch { return []; } })());
+const keepPlans = () => { try { localStorage.setItem("tatami-plans-shut", JSON.stringify([...planShut])); } catch { /* private window */ } };
 // The order you put them in: you drag cards along their rows, and this desk remembers the
 // order as one list of ids. A room shows its orchestrator first, then the rest in this order;
 // ones you haven't placed (new agents) come after, as the board lists them.
@@ -2403,7 +2420,7 @@ function fillRoom(el, r, hues, tints) {
   $(".chat-toggle", chat).disabled = !last;
   meta.textContent = last ? `${said} ${said === 1 ? "message" : "messages"} \u00b7 ${nameOf(last.from)}`
                             + `${last.earlier ? " (earlier)" : ""} at ${clock(last.ts)}` : "nothing said here yet";
-  showChat(chat, open);
+  showFold(chat, open);
   const sig = JSON.stringify([r.recent, lead?.id]);
   if (talk.dataset.sig !== sig) {
     const fresh = talk.dataset.sig !== undefined;   // not the room's first drawing
@@ -2447,12 +2464,17 @@ function fillPlan(el, r, hues) {
   plan.hidden = !tasks.length && !p.claims.length;
   const waiting = tasks.filter((t) => t.status === "done").length;
   const left = tasks.filter((t) => ["open", "doing", "blocked"].includes(t.status)).length;
-  const all = left + waiting + p.landed;
-  $(".plan-meta", plan).textContent = [p.landed && `${p.landed} landed`, waiting && `${waiting} to land`,
-                                       left ? `${left} left` : all && "nothing left"].filter(Boolean).join(" \u00b7 ");
+  const all = left + waiting + p.landed, stuck = tasks.filter((t) => t.status === "blocked").length;
+  const meta = $(".plan-meta", plan), open = !planShut.has(r.name);
+  meta.textContent = [stuck && `${stuck} stuck`, p.landed && `${p.landed} landed`, waiting && `${waiting} to land`,
+                      left ? `${left} left` : all && "nothing left"].filter(Boolean).join(" \u00b7 ");
   $(".plan-bar", plan).style.setProperty("--done", all ? `${Math.round(100 * (p.landed + waiting / 2) / all)}%` : "0%");
+  showFold(plan, open);
   const sig = JSON.stringify(p);
   if (plan.dataset.sig !== sig) {
+    if (plan.dataset.sig !== undefined && !open && !REDUCED) {   // news, folded away
+      meta.animate([{ color: "#ff85c0", offset: 0 }], { duration: 1800, easing: "ease-out" });
+    }
     plan.dataset.sig = sig;
     $(".tasks", plan).replaceChildren(...tasks.map(taskLine));
     $(".held", plan).replaceChildren(...p.claims.map((c) => holdChip(c, r.name)));
@@ -2503,10 +2525,10 @@ function holdChip(c, room) {
   return chip;
 }
 
-function showChat(chat, open) {
-  chat.classList.toggle("is-open", open);
-  $(".chat-toggle", chat).setAttribute("aria-expanded", String(open));
-  $(".chat-body", chat).inert = !open;
+function showFold(box, open) {   // a room's chat or plan, open or folded away
+  box.classList.toggle("is-open", open);
+  $(".chat-toggle, .plan-toggle", box).setAttribute("aria-expanded", String(open));
+  $(".chat-body, .plan-body", box).inert = !open;
 }
 function clock(ts) { return new Date(ts * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
 
@@ -3180,8 +3202,16 @@ roomsEl.addEventListener("click", (e) => {   // the arrow: open or fold away a r
   if (open) chatOpen.add(name); else chatOpen.delete(name);
   keepChats();
   if (open) talk.scrollTop = talk.scrollHeight;   // it opens at the newest
-  showChat(chat, open);
+  showFold(chat, open);
   requestAnimationFrame(() => edges(talk));
+});
+roomsEl.addEventListener("click", (e) => {   // and its plan's
+  const plan = e.target.closest(".plan-toggle")?.closest(".plan");
+  if (!plan) return;
+  const name = plan.closest(".room").dataset.name, open = !plan.classList.contains("is-open");
+  if (open) planShut.delete(name); else planShut.add(name);
+  keepPlans();
+  showFold(plan, open);
 });
 roomsEl.addEventListener("transitionend", (e) => {
   if (e.target.classList?.contains("chat-body")) edges($(".talk", e.target));
