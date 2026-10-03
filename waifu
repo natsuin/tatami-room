@@ -323,6 +323,8 @@ APP_BROWSERS = ("brave.exe", "chrome.exe", "msedge.exe", "vivaldi.exe", "chromiu
 # picked, and checked against the checksum Electron published for it (SHASUMS256.txt).
 ELECTRON = ("v44.4.3", "790a355b684d5c7cc8dc3cdd8c4cca7c4b2d054685427c7554a956879a82e70b")
 APP_EXE = "Tatami Room.exe"
+# Tatami Room's mark, for tatami.ico: each mat's top-left corner (34 x 10, in board.html's #mark units) and colour.
+MARK = ((24, 24, (142, 203, 255)), (30, 38, (195, 166, 255)), (36, 52, (255, 133, 192)), (42, 66, (255, 195, 138)))
 APP_FILES = ("package.json", "main.js", "preload.js", "helper.ps1", "terminal.html", "terminal.js",
              "terminal-preload.js", "vendor/xterm.js", "vendor/xterm.css", "vendor/addon-fit.js",
              "vendor/LICENSE-xterm", "vendor/LICENSE-addon-fit")  # the app's own code, in this repo's app/ folder
@@ -407,6 +409,24 @@ def install_app():
     sync_app()
 
 
+def mark_icon():
+    """tatami.ico, the app's and the shortcuts' icon, redrawn when the mark has changed since it was drawn."""
+    icon = os.path.join(LAUNCHER_DIR, "tatami.ico")
+    drawn = icon + ".mark"   # which drawing it holds
+    try:
+        with open(drawn) as f:
+            if f.read() == repr(MARK) and os.path.exists(icon):
+                return icon
+    except OSError:
+        pass
+    with_pillow("_mark", icon + ".new")
+    if os.path.exists(icon + ".new"):   # not if Pillow couldn't be had: then the old one stays, to retry next time
+        os.replace(icon + ".new", icon)
+        with open(drawn, "w") as f:
+            f.write(repr(MARK))
+    return icon
+
+
 def sync_app():
     """Put the app's code from this repo into the installed app, when it changed. waifu hello runs
     this, so `git pull` updates the app like everything else (it applies when the app restarts)."""
@@ -420,8 +440,9 @@ def sync_app():
             files[name] = f.read()
     files["config.json"] = json.dumps({"distro": DISTRO, "tatami": tatami_path(),
                                        "launcher": win_path(LAUNCHER_DIR)}, indent=2).encode()
-    if os.path.exists(os.path.join(LAUNCHER_DIR, "tatami.ico")):
-        with open(os.path.join(LAUNCHER_DIR, "tatami.ico"), "rb") as f:
+    icon = mark_icon()
+    if os.path.exists(icon):
+        with open(icon, "rb") as f:
             files["tatami.ico"] = f.read()
     for name, data in files.items():
         path = os.path.join(dst, name)
@@ -853,18 +874,17 @@ def _icon(src, dst):
 
 
 def _mark(dst):
-    """Tatami Room's mark as a Windows .ico: four mats turning around a half mat, the way
-    a four-and-a-half-mat room is laid (the same drawing as the board's own icon)."""
+    """Tatami Room's mark as a Windows .ico: four mats laid in steps, a team at work together
+    (the same drawing as the board's own icon, whose viewBox is 23 23 54 54)."""
     from PIL import Image, ImageDraw
     size = 512
-    u = size / 30
+    u = size / 54
     im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
-    for x, y, w, h, fill in ((.6, .6, 18.8, 8.8, (255, 133, 192, 255)), (20.6, .6, 8.8, 18.8, (195, 166, 255, 255)),
-                             (10.6, 20.6, 18.8, 8.8, (255, 195, 138, 255)), (.6, 10.6, 8.8, 18.8, (142, 203, 255, 255)),
-                             (10.6, 10.6, 8.8, 8.8, (245, 230, 240, 90))):
-        d.rounded_rectangle((x * u, y * u, (x + w) * u, (y + h) * u), radius=1.2 * u, fill=fill)
-    im.save(dst, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (256, 256)])
+    for x, y, rgb in MARK:
+        d.rounded_rectangle(((x - 23) * u, (y - 23) * u, (x + 34 - 23) * u, (y + 10 - 23) * u), radius=2.5 * u,
+                            fill=rgb + (255,))
+    im.save(dst, format="ICO", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (256, 256)])
 
 
 PILLOW_JOBS = {"_render": _render, "_icon": _icon, "_mark": _mark}
@@ -959,8 +979,7 @@ Set-ItemProperty -Path "$k\\shell\\open\\command" -Name '(default)' -Value $run
         if state.get("slot") is not None:
             write_next(state)
             save(STATE, state)
-    icon = os.path.join(LAUNCHER_DIR, "tatami.ico")
-    with_pillow("_mark", icon)
+    icon = mark_icon()
     install_app()
     exe = os.path.join(app_dir(), APP_EXE)
     print(shortcut(DESK_SHORTCUT, exe if os.path.exists(exe) else "desk.vbs",

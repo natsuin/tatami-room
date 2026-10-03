@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Tatami Room</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3E%3Crect x='.6' y='.6' width='18.8' height='8.8' rx='1.2' fill='%23ff85c0'/%3E%3Crect x='20.6' y='.6' width='8.8' height='18.8' rx='1.2' fill='%23c3a6ff'/%3E%3Crect x='10.6' y='20.6' width='18.8' height='8.8' rx='1.2' fill='%23ffc38a'/%3E%3Crect x='.6' y='10.6' width='8.8' height='18.8' rx='1.2' fill='%238ecbff'/%3E%3Crect x='10.6' y='10.6' width='8.8' height='8.8' rx='1.2' fill='%23f5e6f0' fill-opacity='.35'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='23 23 54 54'%3E%3Crect x='24' y='24' width='34' height='10' rx='2.5' fill='%238ecbff'/%3E%3Crect x='30' y='38' width='34' height='10' rx='2.5' fill='%23c3a6ff'/%3E%3Crect x='36' y='52' width='34' height='10' rx='2.5' fill='%23ff85c0'/%3E%3Crect x='42' y='66' width='34' height='10' rx='2.5' fill='%23ffc38a'/%3E%3C/svg%3E">
 <style nonce="__NONCE__">
 /* Tatami Room desk. Every agent is a card that looks like its own window: the window's colour
    with its girl drawn in dots, as Terminal shows her. A team's cards sit together on a stage of
@@ -112,8 +112,8 @@ button, input { font: inherit; color: inherit; }
 /* ...and the panel takes the right side under the bar: the desk makes room. */
 .app main, .app .lobby, .app .empty { margin-right: var(--panel, 0px); }
 .brand { display: flex; align-items: center; gap: 11px; flex: none; }
-.brand svg { width: 26px; height: 26px; flex: none; transition: rotate .8s var(--bounce); }
-.brand:hover svg { rotate: 90deg; }   /* the mats turn like a pinwheel */
+.brand svg { width: 26px; height: 26px; flex: none; transition: translate .6s var(--bounce); }
+.brand:hover svg { translate: 0 -3px; }   /* the mats hop up a step */
 h1 { margin: 0; font: 650 1.2rem/1 var(--display); letter-spacing: -.02em; white-space: nowrap; }
 .summary { flex: 0 100 auto; margin: 0; color: var(--muted); font-size: .84rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .status {
@@ -1017,12 +1017,11 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 </head>
 <body>
 <svg class="defs" aria-hidden="true" focusable="false">
-  <symbol id="mark" viewBox="0 0 30 30">
-    <rect x=".6" y=".6" width="18.8" height="8.8" rx="1.2" fill="#ff85c0"/>
-    <rect x="20.6" y=".6" width="8.8" height="18.8" rx="1.2" fill="#c3a6ff"/>
-    <rect x="10.6" y="20.6" width="18.8" height="8.8" rx="1.2" fill="#ffc38a"/>
-    <rect x=".6" y="10.6" width="8.8" height="18.8" rx="1.2" fill="#8ecbff"/>
-    <rect x="10.6" y="10.6" width="8.8" height="8.8" rx="1.2" fill="#f5e6f0" fill-opacity=".35"/>
+  <symbol id="mark" viewBox="23 23 54 54">   <!-- four mats laid in steps: a team at work together -->
+    <rect x="24" y="24" width="34" height="10" rx="2.5" fill="#8ecbff"/>
+    <rect x="30" y="38" width="34" height="10" rx="2.5" fill="#c3a6ff"/>
+    <rect x="36" y="52" width="34" height="10" rx="2.5" fill="#ff85c0"/>
+    <rect x="42" y="66" width="34" height="10" rx="2.5" fill="#ffc38a"/>
   </symbol>
 </svg>
 <div class="sky" id="sky" aria-hidden="true">
@@ -2208,16 +2207,14 @@ function crestArt(flower) {
     case "kaki": return dot(50, 58, 26) + `<path d="M50 32C58 24 68 25 74 30C66 34 57 35 50 32ZM50 32C42 24 32 25 26 30C34 34 43 35 50 32Z"/>`
       + `<path d="M50 32V20" fill="none" stroke-width="4" stroke-linecap="round"/>`;
     case "zakuro": return dot(50, 58, 26) + `<path d="M38 36L40 22L45.5 30L50 18L54.5 30L60 22L62 36Z"/>`;
-    default:   // the desk's mark: four mats round a square
-      return `<g transform="translate(20 20) scale(2)"><rect x=".6" y=".6" width="18.8" height="8.8" rx="1.2"/>`
-        + `<rect x="20.6" y=".6" width="8.8" height="18.8" rx="1.2"/><rect x="10.6" y="20.6" width="18.8" height="8.8" rx="1.2"/>`
-        + `<rect x=".6" y="10.6" width="8.8" height="18.8" rx="1.2"/></g>`;
   }
 }
 
+// Only a room named for a flower wears a crest; any other room's stage stays plain.
 const crests = new Map();
 function crest(room, color) {
   const flower = KANJI[flowerOf(room)] ? flowerOf(room) : "", key = `${flower} ${color}`;
+  if (!flower) return "none";
   if (!crests.has(key)) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g fill="${color}" stroke="${color}" stroke-width="0">`
       + `<circle cx="50" cy="50" r="46" fill="none" stroke-width="4"/>${crestArt(flower)}</g></svg>`;

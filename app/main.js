@@ -420,6 +420,10 @@ function createWindow(background) {
     },
   });
   if (b.maximized) win.maximize();
+  // What Windows pins when you pin the running window. Without it the pin takes the .exe's own
+  // name and icon, which are Electron's.
+  win.setAppDetails({ appId: APP_ID, appIconPath: ICON, appIconIndex: 0,
+    relaunchCommand: `"${process.execPath}"`, relaunchDisplayName: "Tatami Room" });
   // Only the board, ever: no other pages, no pop-up windows.
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (e, to) => {
@@ -514,6 +518,31 @@ function shortcuts() {
     shell.writeShortcutLink(lnk, "create", { target: process.execPath, appUserModelId: APP_ID, icon: ICON,
       iconIndex: 0, description: "Tatami Room: the desk where your Claude agents team up" });
   });
+  // Pins made before the window said what to pin are named "Electron" and show Electron's icon:
+  // give them the mark, and the app's id so the running app sits on its pin.
+  const same = (a, b) => path.resolve(a || "").toLowerCase() === path.resolve(b).toLowerCase();
+  let fixed = false;
+  for (const dir of [path.join(app.getPath("appData"), "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar"), places[0]]) {
+    let names = [];
+    try { names = fs.readdirSync(dir).filter((n) => n.toLowerCase().endsWith(".lnk")); } catch { continue; }
+    for (const name of names) {
+      const lnk = path.join(dir, name);
+      let s;
+      try { s = shell.readShortcutLink(lnk); } catch { continue; }
+      if (!same(s.target, process.execPath) || (same(s.icon, ICON) && s.appUserModelId === APP_ID)) continue;
+      fixed = shell.writeShortcutLink(lnk, "update", { icon: ICON, iconIndex: 0, appUserModelId: APP_ID }) || fixed;
+    }
+  }
+  // Windows shows a shortcut's old picture until its icon cache is refreshed: do that when a pin
+  // was fixed or the mark itself changed.
+  const seen = path.join(app.getPath("userData"), "icon-seen");
+  let mark = "", was = "";
+  try { mark = crypto.createHash("sha256").update(fs.readFileSync(ICON)).digest("hex"); } catch { return; }
+  try { was = fs.readFileSync(seen, "utf8"); } catch { /* never refreshed yet */ }
+  if (fixed || mark !== was) {
+    execFile(path.join(process.env.WINDIR || "C:\\Windows", "System32", "ie4uinit.exe"), ["-show"], { windowsHide: true }, () => {});
+    try { fs.writeFileSync(seen, mark); } catch { /* it refreshes again next start, no harm */ }
+  }
 }
 
 // ---- watching the board: who needs you, and whether it's still running ----
