@@ -170,7 +170,11 @@ def hold(session, kind):
             os.execvp("bash", ["bash", "-li"])
         # TATAMI_AGENT reaches the agent's Tatami Room channel (its MCP server), which puts it on
         # the desk as this kind. Only this agent's: another started later in the shell is its own.
-        os.execvp("bash", ["bash", "-lic", f"TATAMI_AGENT={kind} {command}; exec bash"])
+        # Ctrl+Z suspends Claude, and the shell would go on to `exec bash`, which leaves it stopped
+        # where `fg` can't reach it: the terminal would show a prompt, its card an agent that's
+        # gone. So a suspended agent goes straight on again.
+        os.execvp("bash", ["bash", "-lic", f"TATAMI_AGENT={kind} {command}; "
+                                           "while jobs %% >/dev/null 2>&1; do fg >/dev/null; done; exec bash"])
     set_size(fd, 100, 30)
     keep(b"\r\x1b[2K")  # Claude draws from here
     send(b"\r\x1b[2K")
@@ -217,10 +221,49 @@ def hold(session, kind):
                 os.remove(p)
             except OSError:
                 pass
+        hang_up(pid, fd)
+
+
+def in_session(sid):
+    """The processes still running in the terminal's session (its shell's, which pty.fork began)."""
+    out = []
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
         try:
-            os.kill(pid, signal.SIGHUP)  # hang up, as closing a window would
-        except OSError:
-            pass
+            with open(f"/proc/{name}/stat", "rb") as f:
+                state, _ppid, _pgrp, session = f.read().rsplit(b")", 1)[1].split()[:4]
+        except (OSError, ValueError):
+            continue
+        if int(session) == sid and state not in (b"Z", b"X"):
+            out.append(int(name))
+    return out
+
+
+def hang_up(shell, fd):
+    """End the terminal, as closing a window would: hang up its shell and the agent, and anything
+    else still in it, such as an agent stopped in the background, which a hang-up alone never
+    reaches. A stopped one is let go on to hear it. Whatever is left after a few seconds is
+    killed: nothing that was in the terminal outlives it, to stay on the desk with nowhere to show."""
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+    def signal_all(*sigs):
+        for p in in_session(shell):
+            for sig in sigs:
+                try:
+                    os.kill(p, sig)
+                except OSError:
+                    pass
+
+    signal_all(signal.SIGHUP, signal.SIGCONT)
+    for _ in range(50):
+        if not in_session(shell):
+            return
+        time.sleep(0.1)
+    signal_all(signal.SIGKILL)
 
 
 # ---- what the app runs: attach, starting the holder if need be ----

@@ -1,5 +1,6 @@
 """Tests for the app's terminals (term.py): the agent outlives the app, and the app gets its
-screen back when it attaches again. A stand-in `claude` echoes what's typed.
+screen back when it attaches again; Ctrl+Z doesn't strand it, and ending the terminal ends all of
+it. A stand-in `claude` echoes what's typed.
 
   python3 -m unittest discover -s tatami/tests
 """
@@ -14,6 +15,52 @@ import unittest
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TERM = os.path.join(HERE, "term.py")
+
+# Like Claude where it matters: Ctrl+Z suspends it (Claude sends its process group SIGTSTP). And
+# this one won't hang up, and leaves something stopped in a process group of its own, as an agent
+# wedged in the background would be: what ending the terminal has to reach all the same.
+STUBBORN = r'''
+import os, signal, sys, time, tty
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+def back(*_):  # as Claude does
+    try:
+        tty.setraw(0)
+        os.write(1, b"back again\r\n")
+    except Exception:
+        pass
+signal.signal(signal.SIGCONT, back)
+child = os.fork()
+if child == 0:
+    signal.signal(signal.SIGCONT, signal.SIG_DFL)
+    os.setpgid(0, 0)
+    os.kill(0, signal.SIGSTOP)
+    while True:
+        time.sleep(1)
+with open(os.environ["STUBBORN_PIDS"], "w") as f:
+    f.write(f"{os.getpid()} {child}")
+tty.setraw(0)
+os.write(1, f"agent up as {os.environ['TATAMI_SESSION']}\r\n".encode())
+while True:
+    try:
+        c = os.read(0, 1)
+    except OSError:
+        time.sleep(0.1)
+        continue
+    if c == b"\x1a":
+        os.write(1, b"suspended\r\n")
+        os.kill(0, signal.SIGTSTP)
+    elif c:
+        os.write(1, c.upper())  # not what a shell would echo
+'''
+
+
+def ended(pid):
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as f:
+            return f.read().rsplit(b")", 1)[1].split()[0] in (b"Z", b"X")
+    except OSError:
+        return True
 
 
 class Terminal(unittest.TestCase):
@@ -104,6 +151,62 @@ class Terminal(unittest.TestCase):
             if not self.listed():
                 break
             time.sleep(0.1)
+        self.assertEqual(self.listed(), [])
+
+    def stubborn(self):
+        """The `claude` here becomes STUBBORN; its pid and its stopped child's, once it's up."""
+        with open(os.path.join(self.scratch, "bin", "claude"), "w") as f:
+            f.write(f"#!{sys.executable}\n{STUBBORN}")
+        pids = self.env["STUBBORN_PIDS"] = os.path.join(self.scratch, "pids")
+
+        def up():
+            with open(pids) as f:
+                return [int(p) for p in f.read().split()]
+
+        def kill_them():
+            for pid in up() if os.path.exists(pids) else []:
+                try:
+                    os.kill(pid, 9)
+                except OSError:
+                    pass
+
+        self.addCleanup(kill_them)
+        return up
+
+    def test_ctrl_z_doesnt_strand_the_agent(self):
+        up = self.stubborn()
+        app = self.attach("app-test3")
+        app.stdin.write(b"\x1b]7373;keep\x07")
+        app.stdin.flush()
+        self.read_until(app, "agent up")
+        app.stdin.write(b"\x1a")
+        app.stdin.flush()
+        self.read_until(app, "suspended")
+        self.read_until(app, "back again")  # straight on again, not stopped behind a prompt
+        app.stdin.write(b"typing on")
+        app.stdin.flush()
+        self.read_until(app, "TYPING ON")  # the agent's still the one reading
+        self.assertFalse(ended(up()[0]))
+        app.stdin.write(b"\x1b]7373;end\x07")
+        app.stdin.flush()
+
+    def test_ending_the_terminal_ends_all_of_it(self):
+        up = self.stubborn()
+        app = self.attach("app-test4")
+        app.stdin.write(b"\x1b]7373;keep\x07")
+        app.stdin.flush()
+        self.read_until(app, "agent up")
+        agent, stopped = up()
+        self.assertFalse(ended(agent) or ended(stopped))
+        app.stdin.write(b"\x1b]7373;end\x07")  # End in the app
+        app.stdin.flush()
+        app.wait(timeout=10)
+        for _ in range(100):
+            if ended(agent) and ended(stopped):
+                break
+            time.sleep(0.1)
+        self.assertTrue(ended(agent), "the agent outlived its terminal")
+        self.assertTrue(ended(stopped), "what it left stopped outlived its terminal")
         self.assertEqual(self.listed(), [])
 
 
