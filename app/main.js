@@ -352,14 +352,16 @@ function quit() {
 }
 
 // Restart: the app's newest code from the repo (waifu sync-app), then the app again. Its terminals keep running
-// and it attaches to them again. A short wsl.exe of its own holds WSL up while the app is away.
-async function restart() {
+// and it attaches to them again. A short wsl.exe of its own holds WSL up while the app is away. `opening`: the app
+// is only just starting (see start), so it starts again as it was asked to, once, with --updated.
+async function restart(opening = false) {
   if (restarting) return;
   restarting = true;
   await tatami(["sync-app"], 30000);
   spawn("wsl.exe", ["-d", CONFIG.distro, "--", "sleep", "45"], { windowsHide: true, detached: true, stdio: "ignore" }).unref();
   saveBounds();
-  app.relaunch({ args: process.argv.slice(1).filter((a) => a !== "--new-claude" && a !== "--background") });
+  const args = process.argv.slice(1).filter((a) => a !== "--updated");
+  app.relaunch({ args: opening ? [...args, "--updated"] : args.filter((a) => a !== "--new-claude" && a !== "--background") });
   app.exit(0);
 }
 
@@ -385,10 +387,15 @@ function runningHash(files) {
   return h.digest("hex");
 }
 
+function behind(s) {
+  return !!s?.app && Array.isArray(s.app.files) && typeof s.app.hash === "string" && STARTED_WITH.size > 0 &&
+    runningHash(s.app.files) !== s.app.hash;
+}
+
 let updateReady = false;
 function checkUpdate(s) {
   if (!s.app || !Array.isArray(s.app.files) || typeof s.app.hash !== "string" || !STARTED_WITH.size) return;
-  const ready = runningHash(s.app.files) !== s.app.hash;
+  const ready = behind(s);
   if (ready === updateReady) return;
   updateReady = ready;
   trayMenu();
@@ -631,6 +638,21 @@ function answering(url) {
   });
 }
 
+// The board's state, once: null if it doesn't answer in time.
+function stateOf() {
+  return new Promise((resolve) => {
+    const req = http.get({ host: "127.0.0.1", port: board.port, path: "/api/state", timeout: 3000,
+      headers: { "X-Tatami-Token": board.searchParams.get("token") } }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => { try { resolve(res.statusCode === 200 ? JSON.parse(body) : null); } catch { resolve(null); } });
+    });
+    req.on("timeout", () => req.destroy());
+    req.on("error", () => resolve(null));
+  });
+}
+
 async function start() {
   app.setAppUserModelId(APP_ID);
   nativeTheme.themeSource = "dark";
@@ -646,6 +668,10 @@ async function start() {
       return;
     }
   }
+  // Opened again after the repo's app code changed (quit, then opened): what opens should be that code, so it goes
+  // in first and the app starts again, before anything shows, as Restart does. Only once: if it's still behind
+  // after that, the tray offers Restart, as before.
+  if (!process.argv.includes("--updated") && behind(await stateOf())) return restart(true);
   startHelper();  // ready before the first click
   holdWsl();
   setInterval(holdWsl, 60000);
