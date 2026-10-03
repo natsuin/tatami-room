@@ -253,6 +253,8 @@ h1 { margin: 0; font: 650 1.2rem/1 var(--display); letter-spacing: -.02em; white
   background: rgba(30, 22, 39, .97);
   box-shadow: inset 0 0 0 1px rgba(255, 228, 244, .1), 0 30px 60px -24px rgba(0, 0, 0, .95);
   -webkit-app-region: no-drag;
+  translate: var(--shift, 0px) 0;   /* left of the terminal panel while one is open (skyPlace) */
+  transition: translate .45s var(--glide);
 }
 .sky-panel[hidden] { display: none; }
 .sky-moon { margin: 0; display: flex; align-items: baseline; gap: 9px; color: var(--muted); font-size: .8rem; }
@@ -1177,6 +1179,7 @@ APP?.onPanel?.((width) => {   // the desk makes room for the terminal panel, and
   document.documentElement.style.setProperty("--panel", `${width}px`);
   glide(at);
   sky.resize();   // and the moon and branch move over with it
+  skyPlace();     // and so does the sky's panel, if it's open
 });
 if (APP) document.getElementById("new-claude").title = "Start Claude in a terminal beside the desk";
 // Who made each kind of agent: its name on the card, and a small mark in its colour. They come
@@ -3259,10 +3262,21 @@ function skyOpen(open) {
   $("#sky-moon").replaceChildren(name, `${m.en}, ${m.lit}% lit tonight`);
   for (const r of skyPanel.querySelectorAll("input[type=radio]")) r.checked = sky.prefs[r.name] === r.value;
   $("#sky-branch-toggle").checked = sky.prefs.branch;
+  skyPlace();
   if (!REDUCED) {
     skyPanel.animate([{ opacity: 0, transform: "translateY(-8px) scale(.96)" }, { opacity: 1, transform: "none" }],
                      { duration: 460, easing: BOUNCE });
   }
+}
+// The app draws its terminal panel over the desk's right side, so with one open the sky's panel
+// moves left until it clears it, narrowing if it must, and glides along as the terminal comes and
+// goes. Clicks in the terminal don't reach the desk, so it stays open while you work there.
+function skyPlace() {
+  if (skyPanel.hidden) return;
+  const panel = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel")) || 0;
+  const edge = $("#skyctl").getBoundingClientRect().right, right = Math.min(edge, innerWidth - panel - 16);
+  skyPanel.style.setProperty("--shift", `${right - edge}px`);
+  skyPanel.style.width = right - 16 < 304 ? `${Math.max(240, right - 16)}px` : "";
 }
 skyButton.addEventListener("click", () => skyOpen(skyPanel.hidden));
 document.addEventListener("pointerdown", (e) => { if (!skyPanel.hidden && !e.target.closest?.("#skyctl")) skyOpen(false); });
