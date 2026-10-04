@@ -26,14 +26,18 @@ function make(key) {
   term.onBinary((d) => T.binary(key, d));
   term.onResize(({ cols, rows }) => T.resize(key, cols, rows));
   // Ctrl+V pastes; Ctrl+C copies when there's a selection (Ctrl+Shift+C always), else it's Ctrl+C.
+  // Returning false only keeps xterm from typing the key: the key is cancelled too, or Chromium
+  // pastes (or copies) on its own as well, and xterm sends that paste again.
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== "keydown" || !e.ctrlKey) return true;
     const k = e.key.toLowerCase();
     if (k === "v") {
+      e.preventDefault();
       T.paste().then((text) => { if (text) term.paste(text); });
       return false;
     }
     if (k === "c" && (e.shiftKey || term.hasSelection())) {
+      e.preventDefault();
       T.copy(term.getSelection());
       term.clearSelection();
       return false;
