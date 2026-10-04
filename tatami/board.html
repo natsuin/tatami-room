@@ -1658,7 +1658,7 @@ const sky = (() => {
       x: 0, y: 0, vx: 0, vy: 0, fade: 1, squash: 1, life: Infinity, front: false, burst: false,
       on: null, lx: 0, rest: 0, lands: false, groundY: H, retire: false,
       seed: Math.random() * 200, wander: 0, blink: Math.random() * TAU, blinkV: .8 + Math.random() * 1.8,
-      glint: layer === "mid" && Math.random() < (season.glint || 0), shine: 0, shineT: 9, shineAt: T + 1 + Math.random() * 8,
+      glint: layer === "mid" && Math.random() < (season.glint || 0), shine: 0, shineT: 9, shineAt: T + 2 + Math.random() * 16,
     };
     place(p, where);
     return p;
@@ -1786,9 +1786,9 @@ const sky = (() => {
       }
 
       if (p.glint) {   // a flake that catches the light now and then: a quick rise, a slower fade
-        if (T >= p.shineAt) { p.shineT = 0; p.shineAt = T + 4 + Math.random() * 8; }
+        if (T >= p.shineAt) { p.shineT = 0; p.shineAt = T + 8 + Math.random() * 16; }
         p.shineT += dt;
-        p.shine = p.shineT < .12 ? p.shineT / .12 : Math.max(0, 1 - (p.shineT - .12) / .5);
+        p.shine = p.shineT < .24 ? p.shineT / .24 : Math.max(0, 1 - (p.shineT - .24) / 1);
       }
 
       if (p.on) {   // resting: it lies flat, and fades before it goes
