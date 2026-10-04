@@ -78,8 +78,8 @@ button, input { font: inherit; color: inherit; }
 .defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 
 /* The sky behind the desk (see "the sky" in the script): stars and tonight's moon, a branch, and
-   whatever the season lets fall. The front layer holds what passes in front of the desk: close
-   petals, ones resting on a room, and the ones a card throws up. It sits under the bar. */
+   whatever the season lets fall. The front layer holds what passes in front of a room's glass:
+   petals resting on a room or falling off it, and the ones a card throws up. It sits under the bar. */
 .sky, .sky-front { position: fixed; inset: 0; pointer-events: none; }
 .sky { z-index: -1; overflow: hidden; }
 .sky-front { z-index: 9; width: 100%; height: 100%; }
@@ -1473,9 +1473,11 @@ const resting = (s, to, near) => Math.abs(s.x - to) < near && Math.abs(s.v) < ne
 
 // Behind the desk, a night sky: stars, tonight's moon in its real phase, a branch reaching in from
 // the right, and whatever the season lets fall: cherry petals, maple leaves or snow, or fireflies
-// wandering in the summer dark. They fall at three depths. Far ones are small and soft; middle
-// ones pass behind the desk's glass and settle a while on top of a room, or of a card on its own;
-// a few close ones, big and out of focus, drift in front of everything but the bar. A moving hand
+// wandering in the summer dark. They fall at two depths. Far ones are small and soft, out of focus
+// behind the desk; middle ones are sharp, at the desk itself, passing behind its glass and settling
+// a while on top of a room, or of a card on its own. Nothing falls between you and the desk: big,
+// blurred ones close up would have to pass in front of the terminal panel, and the page can't draw
+// over it, so they'd seem to slip behind it, which nothing close to you could do. A moving hand
 // stirs them, a carried card more so, and a card landing knocks them off its room. The button in
 // the bar picks the season and how many fall, and the desk remembers.
 
@@ -1643,13 +1645,13 @@ const sky = (() => {
   // ---- what falls ----
 
   function spawn(layer, where) {
-    if (!layer) { const r = Math.random(); layer = r < .42 ? "far" : r < .91 ? "mid" : "near"; }
-    const z = layer === "far" ? Math.random() * .33 : layer === "mid" ? .36 + Math.random() * .4 : .82 + Math.random() * .18;
+    if (!layer) layer = Math.random() < .51 ? "far" : "mid";
+    const z = layer === "far" ? Math.random() * .33 : .36 + Math.random() * .4;
     const turn = season.spin, spin = turn * (Math.random() < .5 ? -1 : 1) * (1.2 + Math.random() * 2.6);
     const look = looks[(Math.random() * looks.length) | 0];
     const p = {
       layer, z, d: .35 + z * .95, size: (7 + z ** 2.2 * 26) * season.size,
-      alpha: season.shape === "glow" ? .5 + z * .5 : layer === "far" ? .3 + z * .8 : layer === "mid" ? .85 : .5,
+      alpha: season.shape === "glow" ? .5 + z * .5 : layer === "far" ? .3 + z * .8 : .85,
       look: layer === "mid" ? look.sharp : look.soft,
       glow: season.shape === "glow", glide: turn ? 28 : 0, sway: season.shape === "flake" ? 14 : 0, fall: season.fall,
       rot: Math.random() * TAU, rotV: (Math.random() - .5) * 1.4 * turn,
@@ -1901,7 +1903,7 @@ const sky = (() => {
       x.clearRect(0, 0, x.canvas.width, x.canvas.height);
       x.globalCompositeOperation = season.shape === "glow" ? "lighter" : "source-over";
     }
-    for (const p of parts) draw(p.front || p.layer === "near" || (p.on && p.on !== "ground") ? g.front : g.back, p);
+    for (const p of parts) draw(p.front || (p.on && p.on !== "ground") ? g.front : g.back, p);
   }
 
   // ---- the moon, the stars and the branch, drawn once (again on a resize) ----
@@ -2217,7 +2219,7 @@ const sky = (() => {
         const a = (-90 + (i / n - .5) * 150 + (Math.random() - .5) * 24) * Math.PI / 180;   // a fan, mostly upward
         const v = 190 + Math.random() * 170, spin = (Math.random() < .5 ? -1 : 1) * (3 + Math.random() * 4);
         parts.push({
-          layer: "near", z: 1, d: .8, size: (9 + Math.random() * 6) * (shape === "maple" ? 1.4 : 1), alpha: 1,
+          layer: "mid", z: 1, d: .8, size: (9 + Math.random() * 6) * (shape === "maple" ? 1.4 : 1), alpha: 1,
           look: burstLooks.get(key), glow: false, glide: 20, sway: 0, fall: 1.1,
           rot: Math.random() * TAU, rotV: (Math.random() - .5) * 3, flip: Math.random() * TAU, flipTo: 0, spin, flipV: spin,
           tilt: Math.random() * TAU, tiltV: (Math.random() - .5) * 3,
