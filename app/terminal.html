@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file: 'unsafe-inline'; img-src http://127.0.0.1:* data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file: 'unsafe-inline'; img-src http://127.0.0.1:*">
 <title>Tatami Room terminal</title>
 <link rel="stylesheet" href="vendor/xterm.css">
 <style>
@@ -86,8 +86,6 @@ main { position: relative; flex: 1; min-height: 0; background: var(--tint); }
 .girl[hidden] { display: none; }
 .term { position: absolute; inset: 10px 4px 6px 20px; }
 .term[hidden] { display: none; }
-/* What passes close by from the desk's sky, over everything here as it is over the desk. */
-#sky { position: fixed; inset: 0; z-index: 10; width: 100%; height: 100%; pointer-events: none; }
 .xterm .xterm-viewport { background-color: transparent !important; }
 .xterm-viewport::-webkit-scrollbar { width: 10px; }
 .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
@@ -108,7 +106,6 @@ main { position: relative; flex: 1; min-height: 0; background: var(--tint); }
 </header>
 <div id="grip" title="Drag to resize"></div>
 <main id="main"><img class="girl" id="girl" alt="" hidden></main>
-<canvas id="sky" aria-hidden="true"></canvas>
 <script src="vendor/xterm.js"></script>
 <script src="vendor/addon-fit.js"></script>
 <script src="terminal.js"></script>

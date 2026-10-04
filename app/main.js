@@ -238,10 +238,7 @@ function layout(slide = false) {
   const [w, h] = win.getContentSize();
   const wanted = panelWidth || Math.max(520, Math.round(w * 0.58));
   const width = shown ? Math.max(0, Math.min(w - 300, Math.max(360, wanted))) : 0;
-  const place = (x) => {
-    panel.setBounds({ x, y: HEAD, width, height: Math.max(0, h - HEAD) });
-    if (panelReady) panel.webContents.send("term:at", x, HEAD);   // where it is, for what passes over it
-  };
+  const place = (x) => panel.setBounds({ x, y: HEAD, width, height: Math.max(0, h - HEAD) });
   clearInterval(sliding);
   panel.setVisible(!!shown && !tucked);
   win.webContents.send("tatami:panel", width, tucked);
@@ -312,14 +309,6 @@ ipcMain.on("tatami:tuck", (event, on) => {
   if (!fromBoard(event) || !panel) return;
   tucked = !!on && !!shown;
   panel.setVisible(!!shown && !tucked);
-});
-
-// Now and then something in the desk's sky passes close by, in front of the panel too: the desk
-// sends its path, and the panel draws its share of it, placed by where the panel is.
-ipcMain.on("tatami:sky-close", (event, pass) => {
-  if (!fromBoard(event) || !panel || !panelReady || !shown || tucked) return;
-  const b = panel.getBounds();
-  panel.webContents.send("term:sky", pass, b.x, b.y);
 });
 
 ipcMain.on("term:input", (e, key, data) => { if (fromPanel(e)) sessions.get(key)?.proc.stdin.write(String(data)); });
