@@ -28,12 +28,14 @@ function make(key) {
   // Ctrl+V pastes; Ctrl+C copies when there's a selection (Ctrl+Shift+C always), else it's Ctrl+C.
   // Returning false only keeps xterm from typing the key: the key is cancelled too, or Chromium
   // pastes (or copies) on its own as well, and xterm sends that paste again.
+  // With no text on the clipboard (a screenshot), the agent gets the Ctrl+V key itself and reads
+  // the image from the clipboard on its own.
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== "keydown" || !e.ctrlKey) return true;
     const k = e.key.toLowerCase();
     if (k === "v") {
       e.preventDefault();
-      T.paste().then((text) => { if (text) term.paste(text); });
+      T.paste().then((text) => { if (text) term.paste(text); else T.input(key, "\x16"); });
       return false;
     }
     if (k === "c" && (e.shiftKey || term.hasSelection())) {
