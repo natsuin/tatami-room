@@ -10,4 +10,5 @@ contextBridge.exposeInMainWorld("tatami", {
   onPanel: (cb) => ipcRenderer.on("tatami:panel", (_e, width, tucked) => cb(Number(width) || 0, tucked === true)),
   panelPicture: () => ipcRenderer.invoke("tatami:panel-picture"),
   tuckPanel: (on) => ipcRenderer.send("tatami:tuck", !!on),
+  skyClose: (pass) => ipcRenderer.send("tatami:sky-close", pass),
 });

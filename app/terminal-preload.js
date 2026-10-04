@@ -16,4 +16,6 @@ contextBridge.exposeInMainWorld("term", {
   hide: () => ipcRenderer.send("term:hide"),
   end: (key) => ipcRenderer.send("term:end-session", key),
   width: (px) => ipcRenderer.send("term:width", Number(px)),
+  onSky: (cb) => ipcRenderer.on("term:sky", (_e, pass, x, y) => cb(pass, Number(x) || 0, Number(y) || 0)),
+  onAt: (cb) => ipcRenderer.on("term:at", (_e, x, y) => cb(Number(x) || 0, Number(y) || 0)),
 });

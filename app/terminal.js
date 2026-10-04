@@ -151,3 +151,56 @@ const letGo = () => { drag = null; grip.classList.remove("held"); };
 grip.addEventListener("pointerup", letGo);
 grip.addEventListener("pointercancel", letGo);
 new ResizeObserver(fitCurrent).observe(main);
+
+// Now and then something in the desk's sky passes close by, in front of the desk and of this
+// panel alike. The page under the panel can't draw over it, so the desk sends its path (board.html,
+// "close by") and the panel draws its share, from the same clock. closeAt and drawClose are the
+// desk's, word for word: change them together.
+function closeAt(c, now) {
+  const s = (now - c.t0) / 1000;
+  if (s < 0 || s > c.life) return null;
+  const flip = c.flip + c.flipV * s;   // tipping as it turns over, it glides one way, then back
+  return {
+    x: c.x + c.vx * s + (c.flipV ? -c.glide / c.flipV * Math.cos(flip) : 0) + c.sway * Math.sin(c.swayW * s + c.seed),
+    y: c.y + c.vy * s + c.bob * Math.sin(c.bobW * s + c.seed),
+    flip, tilt: c.tilt + c.tiltV * s, rot: c.rot + c.rotV * s,
+    a: c.alpha * (c.blinkV ? .3 + .7 * (.5 + .5 * Math.sin(c.blink + c.blinkV * s)) ** 2 : 1),
+  };
+}
+function drawClose(x, c, at, front, back, ox, oy, k) {
+  const face = Math.cos(at.flip), open = c.flipV ? Math.max(.08, Math.abs(face)) : 1;
+  const sy = c.flipV ? .72 + .28 * Math.abs(Math.cos(at.tilt)) : 1;
+  const cos = Math.cos(at.rot), sin = Math.sin(at.rot), D = c.size * c.span;
+  x.globalCompositeOperation = c.light ? "lighter" : "source-over";
+  x.globalAlpha = Math.min(1, at.a * (.7 + .3 * open));
+  x.setTransform(cos * open * k, sin * open * k, -sin * sy * k, cos * sy * k, (at.x - ox) * k, (at.y - oy) * k);
+  x.drawImage(face >= 0 ? front : back, -D / 2, -D / 2, D, D);
+}
+
+const sky = document.getElementById("sky"), skyX = sky.getContext("2d");
+let passes = [], here = { x: 0, y: 0 }, flying = false;
+const picture = (src) => {
+  const img = new Image();
+  if (/^data:image\/png;base64,[\w+/=]+$/.test(src)) img.src = src;
+  return img;
+};
+T.onAt((x, y) => { here = { x, y }; });
+T.onSky((pass, x, y) => {
+  here = { x, y };
+  const front = picture(pass.front);
+  passes.push({ c: pass, front, back: pass.back === pass.front ? front : picture(pass.back) });
+  if (!flying) { flying = true; requestAnimationFrame(fly); }
+});
+function fly() {
+  const k = devicePixelRatio || 1, w = Math.round(innerWidth * k), h = Math.round(innerHeight * k);
+  if (sky.width !== w || sky.height !== h) { sky.width = w; sky.height = h; }
+  skyX.setTransform(1, 0, 0, 1, 0, 0);
+  skyX.clearRect(0, 0, w, h);
+  const now = Date.now();
+  passes = passes.filter(({ c }) => now - c.t0 < c.life * 1000);
+  for (const { c, front, back } of passes) {
+    const at = closeAt(c, now);
+    if (at && front.naturalWidth && back.naturalWidth) drawClose(skyX, c, at, front, back, here.x, here.y, k);
+  }
+  if (passes.length) requestAnimationFrame(fly); else flying = false;
+}

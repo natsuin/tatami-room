@@ -79,10 +79,12 @@ button, input { font: inherit; color: inherit; }
 
 /* The sky behind the desk (see "the sky" in the script): stars and tonight's moon, a branch, and
    whatever the season lets fall. The front layer holds what passes in front of a room's glass:
-   petals resting on a room or falling off it, and the ones a card throws up. It sits under the bar. */
-.sky, .sky-front { position: fixed; inset: 0; pointer-events: none; }
+   petals resting on a room or falling off it, and the ones a card throws up. It sits under the bar.
+   Over everything, even the bar and its menus, is what now and then passes close by. */
+.sky, .sky-front, .sky-close { position: fixed; inset: 0; pointer-events: none; }
 .sky { z-index: -1; overflow: hidden; }
 .sky-front { z-index: 9; width: 100%; height: 100%; }
+.sky-close { z-index: 55; width: 100%; height: 100%; }
 .sky canvas, .bough { position: absolute; inset: 0; width: 100%; height: 100%; }
 .bough { opacity: .78; transform-origin: 100% 10%; animation: sway 9s ease-in-out infinite alternate; }
 .sky.still .bough { animation: none; }
@@ -1086,6 +1088,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
   <canvas id="sky-back"></canvas>
 </div>
 <canvas class="sky-front" id="sky-front" aria-hidden="true"></canvas>
+<canvas class="sky-close" id="sky-close" aria-hidden="true"></canvas>
 <img class="under" id="under" alt="" hidden>
 
 <header class="bar">
@@ -1475,9 +1478,8 @@ const resting = (s, to, near) => Math.abs(s.x - to) < near && Math.abs(s.v) < ne
 // the right, and whatever the season lets fall: cherry petals, maple leaves or snow, or fireflies
 // wandering in the summer dark. They fall at two depths. Far ones are small and soft, out of focus
 // behind the desk; middle ones are sharp, at the desk itself, passing behind its glass and settling
-// a while on top of a room, or of a card on its own. Nothing falls between you and the desk: big,
-// blurred ones close up would have to pass in front of the terminal panel, and the page can't draw
-// over it, so they'd seem to slip behind it, which nothing close to you could do. A moving hand
+// a while on top of a room, or of a card on its own. Now and then one passes close by, big and out
+// of focus, in front of everything, the terminal panel too (see "close by"). A moving hand
 // stirs them, a carried card more so, and a card landing knocks them off its room. The button in
 // the bar picks the season and how many fall, and the desk remembers.
 
@@ -1517,7 +1519,8 @@ function seeded(a) {   // mulberry32: the same stars and the same branch every t
 
 const sky = (() => {
   const TAU = Math.PI * 2;
-  const cv = { stars: $("#sky-stars"), branch: $("#sky-branch"), back: $("#sky-back"), front: $("#sky-front") };
+  const cv = { stars: $("#sky-stars"), branch: $("#sky-branch"), back: $("#sky-back"), front: $("#sky-front"),
+               close: $("#sky-close") };
   const g = Object.fromEntries(Object.entries(cv).map(([k, c]) => [k, c.getContext("2d")]));
   // Per season: what falls, its tints (hue, saturation, lightness), and how it moves compared with
   // a cherry petal: how many, how big, how fast it falls, how much it turns over. In snow, some of
@@ -1550,13 +1553,13 @@ const sky = (() => {
   // ---- sprites: each shape drawn once per tint, sharp and soft, front and back ----
 
   const SPRITE = 64, UNIT = SPRITE * .7;   // a shape fills 70% of its sprite, leaving room to blur
-  function sprite(shape, [h, s, l], { back = false, soft = false, color = "" } = {}) {
+  function sprite(shape, [h, s, l], { back = false, soft = false, close = false, color = "" } = {}) {
     const c = document.createElement("canvas");
-    c.width = c.height = SPRITE;
+    c.width = c.height = close ? SPRITE * 1.5 : SPRITE;   // close by, it's further out of focus
     const x = c.getContext("2d");
-    x.translate(SPRITE / 2, SPRITE / 2);
+    x.translate(c.width / 2, c.height / 2);
     x.scale(UNIT, UNIT);
-    if (soft) x.filter = "blur(4px)";
+    if (soft || close) x.filter = `blur(${close ? 7 : 4}px)`;
     const hsl = (dl, a = 1) => `hsla(${h}, ${s}%, ${clamp(l + dl, 0, 100)}%, ${a})`;
     if (shape === "flake" || shape === "glow") {   // round: a soft snowflake, or a firefly's light
       const r = shape === "flake" ? .5 : .7, grad = x.createRadialGradient(0, 0, 0, 0, 0, r);
@@ -1904,6 +1907,92 @@ const sky = (() => {
       x.globalCompositeOperation = season.shape === "glow" ? "lighter" : "source-over";
     }
     for (const p of parts) draw(p.front || (p.on && p.on !== "ground") ? g.front : g.back, p);
+    renderClose();
+  }
+
+  // ---- close by ----
+
+  // Now and then one passes close to you, big and out of focus, in front of everything: the bar,
+  // the cards, and the terminal panel. The page can't draw over the panel, so the app hands the
+  // panel its path and the panel draws its share (terminal.js). It isn't in the desk's air, so
+  // nothing stirs it: its path is set when it sets off, and both draw it from the same clock.
+  const CLOSE_EVERY = { calm: [18, 36], lively: [7, 16] };   // seconds to the next: at least, and up to this more
+  let closes = [], nextClose = 6 + Math.random() * 14, closeShown = false;
+
+  // Where a close one is at a moment (Date.now()), or null when it's not in sight. terminal.js
+  // has these two word for word, so the panel draws it in step: change them together.
+  function closeAt(c, now) {
+    const s = (now - c.t0) / 1000;
+    if (s < 0 || s > c.life) return null;
+    const flip = c.flip + c.flipV * s;   // tipping as it turns over, it glides one way, then back
+    return {
+      x: c.x + c.vx * s + (c.flipV ? -c.glide / c.flipV * Math.cos(flip) : 0) + c.sway * Math.sin(c.swayW * s + c.seed),
+      y: c.y + c.vy * s + c.bob * Math.sin(c.bobW * s + c.seed),
+      flip, tilt: c.tilt + c.tiltV * s, rot: c.rot + c.rotV * s,
+      a: c.alpha * (c.blinkV ? .3 + .7 * (.5 + .5 * Math.sin(c.blink + c.blinkV * s)) ** 2 : 1),
+    };
+  }
+  function drawClose(x, c, at, front, back, ox, oy, k) {
+    const face = Math.cos(at.flip), open = c.flipV ? Math.max(.08, Math.abs(face)) : 1;
+    const sy = c.flipV ? .72 + .28 * Math.abs(Math.cos(at.tilt)) : 1;
+    const cos = Math.cos(at.rot), sin = Math.sin(at.rot), D = c.size * c.span;
+    x.globalCompositeOperation = c.light ? "lighter" : "source-over";
+    x.globalAlpha = Math.min(1, at.a * (.7 + .3 * open));
+    x.setTransform(cos * open * k, sin * open * k, -sin * sy * k, cos * sy * k, (at.x - ox) * k, (at.y - oy) * k);
+    x.drawImage(face >= 0 ? front : back, -D / 2, -D / 2, D, D);
+  }
+
+  // One sets off (after `delay` seconds): falling across the window faster than anything behind
+  // it, as near things do, or for a firefly, drifting across it.
+  function launchClose(delay) {
+    const tint = season.tints[(Math.random() * season.tints.length) | 0];
+    const glow = season.shape === "glow", turn = season.spin;
+    const front = sprite(season.shape, tint, { close: true });
+    const back = glow || season.shape === "flake" ? front : sprite(season.shape, tint, { back: true, close: true });
+    const size = (44 + Math.random() * 30) * Math.sqrt(season.size);
+    const c = { t0: Date.now() + delay * 1000, size, span: front.width / UNIT, alpha: glow ? .75 : .6, light: glow,
+                x: 0, y: 0, vx: 0, vy: 0, flip: 0, flipV: 0, tilt: 0, tiltV: 0, rot: Math.random() * TAU, rotV: 0,
+                glide: 0, sway: 0, swayW: 0, bob: 0, bobW: 0, blink: 0, blinkV: 0, seed: Math.random() * TAU };
+    const out = size * c.span / 2 + 30;   // far enough off the edge to be out of sight, blur and all
+    if (glow) {
+      const dir = Math.random() < .5 ? 1 : -1;
+      Object.assign(c, { vx: dir * (160 + Math.random() * 80), vy: (Math.random() - .5) * 30, x: dir > 0 ? -out : W + out,
+                         y: H * (.3 + Math.random() * .55), bob: 26, bobW: .9 + Math.random() * .6,
+                         blink: Math.random() * TAU, blinkV: 1.2 + Math.random() * 1.4 });
+      c.life = (W + out * 2) / Math.abs(c.vx);
+    } else {
+      Object.assign(c, { vy: (190 + Math.random() * 90) * Math.sqrt(season.fall), vx: wind() * 2.4 + (Math.random() - .5) * 60,
+                         y: -out, flip: Math.random() * TAU, flipV: turn * (Math.random() < .5 ? -1 : 1) * (1.4 + Math.random() * 2),
+                         tilt: Math.random() * TAU, tiltV: (Math.random() - .5) * 2.4 * turn, rotV: (Math.random() - .5) * 1.6 * turn,
+                         glide: turn ? 60 : 0, sway: turn ? 0 : 22, swayW: 1.3 });
+      c.life = (H + out * 2) / c.vy;
+      c.x = Math.random() * W - c.vx * c.life / 2;   // halfway down, anywhere across
+    }
+    closes.push({ c, front, back });
+    APP?.skyClose?.({ ...c, front: front.toDataURL(), back: back.toDataURL() });
+  }
+
+  // Whether it's time for the next: mostly one on its own, sometimes two or three together.
+  function closeBy() {
+    if (!(prefs.amount in CLOSE_EVERY) || T < nextClose) return;
+    const [least, more] = CLOSE_EVERY[prefs.amount];
+    nextClose = T + least + Math.random() * more;
+    if (APP && !APP.skyClose && VW < W) return;   // an app too old to draw them over its open panel
+    const n = Math.random() < .25 ? 2 + (Math.random() < .4) : 1;
+    for (let i = 0; i < n; i++) launchClose(i * (.4 + Math.random() * .8));
+  }
+
+  function renderClose() {
+    if (!closes.length && !closeShown) return;
+    const x = g.close, now = Date.now();
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    x.clearRect(0, 0, x.canvas.width, x.canvas.height);
+    closes = closes.filter(({ c }) => now - c.t0 < c.life * 1000);
+    for (const { c, front, back } of closes) {
+      const at = closeAt(c, now);
+      if (at) drawClose(x, c, at, front, back, 0, 0, DPR);
+    }
+    closeShown = closes.length > 0;
   }
 
   // ---- the moon, the stars and the branch, drawn once (again on a resize) ----
@@ -2140,6 +2229,7 @@ const sky = (() => {
   function frame(now) {
     if (document.hidden || !parts.length) {
       running = false;
+      closes = [];
       render();
       return;
     }
@@ -2149,6 +2239,7 @@ const sky = (() => {
     last = now;
     T += dt;
     step(dt);
+    closeBy();
     render();
     requestAnimationFrame(frame);
   }
@@ -2164,7 +2255,7 @@ const sky = (() => {
       top = $(".bar").getBoundingClientRect().bottom;
       DPR = Math.min(devicePixelRatio || 1, 1.5);
       const hi = Math.min(devicePixelRatio || 1, 2);
-      for (const [c, k] of [[cv.stars, hi], [cv.branch, hi], [cv.back, DPR], [cv.front, DPR]]) {
+      for (const [c, k] of [[cv.stars, hi], [cv.branch, hi], [cv.back, DPR], [cv.front, DPR], [cv.close, DPR]]) {
         c.width = Math.round(W * k);
         c.height = Math.round(H * k);
       }
