@@ -1480,10 +1480,9 @@ const resting = (s, to, near) => Math.abs(s.x - to) < near && Math.abs(s.v) < ne
 // stirs them, a carried card more so, and a card landing knocks them off its room. The button in
 // the bar picks the season and how many fall, and the desk remembers.
 
-// Shapes a unit tall, pointing up: a sakura petal with the notch at its tip, and a plain rounded
-// petal. A Japanese maple leaf is seven pointed lobes meeting at (cx, cy), the middle one longest.
+// Shapes a unit tall, pointing up: a sakura petal with the notch at its tip. A Japanese maple
+// leaf is seven pointed lobes meeting at (cx, cy), the middle one longest.
 const PETAL = new Path2D("M0 .5 C.46 .26 .44 -.3 .17 -.5 L0 -.38 L-.17 -.5 C-.44 -.3 -.46 .26 0 .5 Z");
-const ROUND = new Path2D("M0 .5 C.42 .34 .46 -.5 0 -.5 C-.46 -.5 -.42 .34 0 .5 Z");
 const MAPLE_LOBES = [[-122, .3], [-82, .42], [-40, .52], [0, .6], [40, .52], [82, .42], [122, .3]];
 function maple(size = 1, cx = 0, cy = .12) {
   const at = (deg, r) => [cx + Math.sin(deg * Math.PI / 180) * r * size, cy - Math.cos(deg * Math.PI / 180) * r * size];
@@ -1501,8 +1500,6 @@ const FLOWER_TINTS = [   // edge, middle, eye
   ["#fff4f9", "#ffd3e7", "#f58fbd"], ["#ffeaf3", "#ffc2dd", "#ef7fb2"],
   ["#fff8fb", "#ffe0ee", "#f7a3c8"], ["#ffe3ef", "#ffb3d4", "#e86fa6"],
 ];
-// Room flowers whose petals are round rather than notched, for the petals a room throws up.
-const ROUND_PETALS = new Set(["ume", "tsubaki", "yamabuki", "mikan", "yuzu", "kaki", "zakuro", "ajisai"]);
 const flowerOf = (room) => (room || "").replace(/-\d+$/, "");   // sakura-2 is still sakura
 
 function seeded(a) {   // mulberry32: the same stars and the same branch every time
@@ -1544,12 +1541,12 @@ const sky = (() => {
   let season = SEASONS[prefs.season], looks = [];
   let W = 0, H = 0, VW = 0, top = 0, DPR = 1, T = 0, gust = 0;
   let parts = [], blossoms = [], ledgeEls = [], ledges = [], age = 0;
-  const rects = new Map(), burstLooks = new Map();
+  const rects = new Map();
 
   // ---- sprites: each shape drawn once per tint, sharp and soft, front and back ----
 
   const SPRITE = 64, UNIT = SPRITE * .7;   // a shape fills 70% of its sprite, leaving room to blur
-  function sprite(shape, [h, s, l], { back = false, soft = false, color = "" } = {}) {
+  function sprite(shape, [h, s, l], { back = false, soft = false } = {}) {
     const c = document.createElement("canvas");
     c.width = c.height = SPRITE;
     const x = c.getContext("2d");
@@ -1567,10 +1564,7 @@ const sky = (() => {
       return c;
     }
     const grad = x.createLinearGradient(0, .5, 0, -.5);   // deeper at the base, paler at the tip
-    if (color) {   // a petal in a room's colour
-      grad.addColorStop(0, color);
-      grad.addColorStop(1, "#fff2f8");
-    } else if (shape === "maple") {
+    if (shape === "maple") {
       grad.addColorStop(0, hsl(back ? -16 : -8));
       grad.addColorStop(1, hsl(back ? -6 : 6));
     } else {
@@ -1580,7 +1574,7 @@ const sky = (() => {
       grad.addColorStop(1, hsl(3 - d));
     }
     x.fillStyle = grad;
-    x.fill(shape === "maple" ? MAPLE : shape === "round" ? ROUND : PETAL);
+    x.fill(shape === "maple" ? MAPLE : PETAL);
     if (shape === "maple") {   // its stem, and a vein down each lobe
       x.lineCap = "round";
       x.strokeStyle = hsl(-20);
@@ -1594,7 +1588,7 @@ const sky = (() => {
         x.lineTo(Math.sin(a * Math.PI / 180) * len * .8, .12 - Math.cos(a * Math.PI / 180) * len * .8);
       }
       x.stroke();
-    } else if (!back && !color) {   // a faint vein down the middle of a petal
+    } else if (!back) {   // a faint vein down the middle of a petal
       x.strokeStyle = `hsla(${h}, 100%, 98%, .5)`;
       x.lineWidth = .025;
       x.beginPath(); x.moveTo(0, .44); x.quadraticCurveTo(.03, .05, 0, -.3); x.stroke();
@@ -1656,7 +1650,7 @@ const sky = (() => {
       rot: Math.random() * TAU, rotV: (Math.random() - .5) * 1.4 * turn,
       flip: turn ? Math.random() * TAU : 0, flipTo: 0, spin, flipV: spin,
       tilt: turn ? Math.random() * TAU : 0, tiltV: (Math.random() - .5) * 2.2 * turn,
-      x: 0, y: 0, vx: 0, vy: 0, fade: 1, squash: 1, life: Infinity, front: false, burst: false,
+      x: 0, y: 0, vx: 0, vy: 0, fade: 1, squash: 1, life: Infinity, front: false,
       on: null, lx: 0, rest: 0, lands: false, groundY: H, retire: false,
       seed: Math.random() * 200, wander: 0, blink: Math.random() * TAU, blinkV: .8 + Math.random() * 1.8,
       glint: layer === "mid" && Math.random() < (season.glint || 0), shine: 0, shineT: 9, shineAt: T + 2 + Math.random() * 16,
@@ -1719,7 +1713,7 @@ const sky = (() => {
   }
 
   function recycle(p, i) {
-    if (p.retire || p.burst) parts.splice(i, 1);
+    if (p.retire) parts.splice(i, 1);
     else place(p, "top");
   }
 
@@ -1727,8 +1721,8 @@ const sky = (() => {
   function populate(fade) {
     const area = clamp(VW * H / (1400 * 850), .6, 1.4);
     const want = REDUCED ? 0 : Math.round(AMOUNT[prefs.amount] * season.count * area);
-    const live = parts.filter((p) => !p.retire && !p.burst);
-    for (const p of parts) if (p.retire && !p.burst && live.length < want) Object.assign(p, { retire: false, life: Infinity }), live.push(p);
+    const live = parts.filter((p) => !p.retire);
+    for (const p of parts) if (p.retire && live.length < want) Object.assign(p, { retire: false, life: Infinity }), live.push(p);
     for (let i = live.length; i < want; i++) {
       const p = spawn(null, "anywhere");
       p.fade = fade;
@@ -1832,7 +1826,7 @@ const sky = (() => {
       p.vy += (ty - p.vy) * ky;
       const ny = p.y + p.vy * dt;
       let caught = null;
-      if (p.layer === "mid" && !p.front && !p.burst && p.vy > 0) {
+      if (p.layer === "mid" && !p.front && p.vy > 0) {
         const L = ledges.find((l) => p.y <= l.top && ny >= l.top && p.x > l.left && p.x < l.right);
         if (L && Math.random() < .55 && parts.reduce((n, q) => n + (q.on === L.el), 0) < L.cap) caught = L;
       }
@@ -2198,7 +2192,7 @@ const sky = (() => {
       Object.assign(prefs, next);
       keep();
       if (prefs.season !== was.season) {
-        parts = parts.filter((p) => p.burst);
+        parts = [];
         dress();
       }
       if (prefs.season !== was.season || prefs.branch !== was.branch) { drawStars(); drawBranch(); }
@@ -2208,33 +2202,11 @@ const sky = (() => {
       wake();
     },
 
-    // A handful thrown up from (x, y) in a room's colour, shaped like its flower's petals: the
-    // desk's way of saying something happened here.
-    burst(x, y, color, n = 8, flower = "") {
-      if (REDUCED || !W) return;
-      const shape = flower === "momiji" ? "maple" : ROUND_PETALS.has(flower) ? "round" : "petal", key = `${shape} ${color}`;
-      if (!burstLooks.has(key)) { const s = sprite(shape, [0, 0, 0], { color }); burstLooks.set(key, { front: s, back: s }); }
-      for (let i = 0; i < n; i++) {
-        const a = (-90 + (i / n - .5) * 150 + (Math.random() - .5) * 24) * Math.PI / 180;   // a fan, mostly upward
-        const v = 190 + Math.random() * 170, spin = (Math.random() < .5 ? -1 : 1) * (3 + Math.random() * 4);
-        parts.push({
-          layer: "mid", z: 1, d: .8, size: (9 + Math.random() * 6) * (shape === "maple" ? 1.4 : 1), alpha: 1,
-          look: burstLooks.get(key), glow: false, glide: 20, sway: 0, fall: 1.1,
-          rot: Math.random() * TAU, rotV: (Math.random() - .5) * 3, flip: Math.random() * TAU, flipTo: 0, spin, flipV: spin,
-          tilt: Math.random() * TAU, tiltV: (Math.random() - .5) * 3,
-          x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, fade: 1, squash: 1, life: 2 + Math.random() * .8,
-          front: true, burst: true, on: null, lx: 0, rest: 0, lands: false, groundY: H, retire: true,
-          seed: Math.random() * 200, wander: 0, blink: 0, blinkV: 0,
-        });
-      }
-      wake();
-    },
-
     // The air a landing card pushes aside, out from (x, y).
     puff(x, y, power = 240, R = 220) {
       for (const p of parts) {
         const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy);
-        if (d > R || p.layer === "far" || p.burst) continue;
+        if (d > R || p.layer === "far") continue;
         const f = 1 - d / R;
         if (p.on && p.on !== "ground") fall(p, 0);
         if (p.on) continue;
@@ -2269,11 +2241,6 @@ const sky = (() => {
     },
   };
 })();
-
-// A handful of petals thrown up from (x, y) in a room's colour.
-function bloom(x, y, color, n = 8, flower = "") {
-  sky.burst(x, y, color, n, flower);
-}
 
 // ---- crests ----
 
@@ -2330,35 +2297,15 @@ function crest(room, color) {
   return crests.get(key);
 }
 
-// A new room blooms once it has grown in and the page has stopped scrolling to it (the petals
-// fly over the window, not the page, so they'd drift off a room still on its way).
-function blossom(room, n) {
-  if (REDUCED) return;
-  const start = performance.now();
-  let y = scrollY, still = 0;
-  const wait = () => {
-    still = scrollY === y ? still + 1 : 0;
-    y = scrollY;
-    if (still < 3 || performance.now() - start < 380) return requestAnimationFrame(wait);
-    if (!room.isConnected) return;
-    const r = $(".stage", room).getBoundingClientRect();
-    bloom(r.left + r.width / 2, r.top + r.height * 0.4, room.style.getPropertyValue("--room"), n, flowerOf(room.dataset.name));
-  };
-  requestAnimationFrame(wait);
-}
-
 // A card landing in a room: the stage gives a little under it, a ring spreads from where it
-// touched down, the air it pushes aside scatters the petals, whatever rested on the room hops
-// off, and petals of the room's flower fly up in its colour.
+// touched down, the air it pushes aside scatters the petals, and whatever rested on the room hops
+// off.
 function impact(card) {
   const room = card.closest(".room");
   const r = card.getBoundingClientRect();
   const x = r.left + r.width / 2, y = r.top + r.height / 2;
   sky.puff(x, y);
-  if (!room) return bloom(x, y, "#ffd6ea", 5);
-  const color = room.style.getPropertyValue("--room") || "#c3a6ff";
-  bloom(x, y - r.height * 0.3, color, 8, flowerOf(room.dataset.name));
-  if (REDUCED) return;
+  if (!room || REDUCED) return;
   const stage = $(".stage", room), fx = $(".fx", room), s = stage.getBoundingClientRect();
   sky.jolt(stage);
   const ring = document.createElement("i");
@@ -2836,8 +2783,7 @@ async function teamUp(card, other, skip) {
   if (el) {
     el.classList.add("flash");
     el.scrollIntoView({ block: "nearest", behavior: REDUCED ? "auto" : "smooth" });
-    blossom(el, 14);   // a new team: a bigger bloom, and a gust through the sky
-    sky.gust(150);
+    sky.gust(150);   // a new team: a gust through the sky
   }
   if (focused) card.focus();
 }
@@ -3337,7 +3283,6 @@ form.addEventListener("submit", async (e) => {
     if (el) {
       el.classList.add("flash");
       el.scrollIntoView({ block: "nearest", behavior: REDUCED ? "auto" : "smooth" });
-      blossom(el, 10);
     }
   }
 });
