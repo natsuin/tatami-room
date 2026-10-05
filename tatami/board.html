@@ -1289,7 +1289,6 @@ function keepOrder(cards) {   // a row's cards, as they now stand
   order = order.filter((id) => !ids.includes(id)).concat(ids).slice(-300);
   try { localStorage.setItem("tatami-order", JSON.stringify(order)); } catch { /* private window */ }
 }
-const arrivals = new Set();   // cards of agents that just turned up
 
 let state = null;            // the latest answer from /api/state
 let held = false;            // a card is in the air: redraw once it's down
@@ -2276,16 +2275,6 @@ function bloom(x, y, color, n = 8, flower = "") {
   sky.burst(x, y, color, n, flower);
 }
 
-// An agent that has just arrived throws up a few petals in its own colour, so you notice from
-// across the desk. (One that finishes its turn glows instead.)
-function cheer(card, n) {
-  if (!card.isConnected) return;
-  const r = card.getBoundingClientRect();
-  if (r.bottom < 0 || r.top > innerHeight) return;
-  const hue = (card.style.getPropertyValue("--hue") || "").match(/\d+/)?.[0];
-  bloom(r.left + r.width / 2, r.top + r.height * 0.3, hue ? `hsl(${hue}, 75%, 80%)` : "#ffd6ea", n);
-}
-
 // ---- crests ----
 
 // Each flower room wears its flower as a crest (kamon) in a ring, faint in the bottom corner of
@@ -2425,8 +2414,6 @@ function render(s) {
   $("#empty").hidden = rooms > 0 || n > 0;
   showUsage(s.usage || {});
   glide(at);
-  for (const card of arrivals) setTimeout(() => cheer(card, 6), 420);   // once it has grown in
-  arrivals.clear();
   firstPaint = false;
 }
 
@@ -2696,7 +2683,6 @@ function cardFor(a) {
   if (card) return card;
   card = tpl("#tpl-agent").cloneNode(true);
   card.dataset.id = a.id;
-  if (!firstPaint) arrivals.add(card);
   const img = $(".girl", card);
   img.addEventListener("load", () => { img.hidden = false; });
   img.addEventListener("error", () => { img.hidden = true; });
