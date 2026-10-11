@@ -77,8 +77,8 @@ button, input { font: inherit; color: inherit; }
 }
 .defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 
-/* The sky behind the desk (see "the sky" in the script): stars and tonight's moon, a branch, and
-   whatever the season lets fall. The front layer holds what passes in front of a room's glass:
+/* The sky behind the desk (see "the sky" in the script): stars and tonight's moon, a branch,
+   whatever the season lets fall, and the drift of what's landed. The front layer holds what passes in front of a room's glass:
    petals resting on a room or falling off it, and the ones a card throws up. It sits under the bar. */
 .sky, .sky-front { position: fixed; inset: 0; pointer-events: none; }
 .sky { z-index: -1; overflow: hidden; }
@@ -1083,6 +1083,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 <div class="sky" id="sky" aria-hidden="true">
   <canvas id="sky-stars"></canvas>
   <div class="bough"><canvas id="sky-branch"></canvas></div>
+  <canvas id="sky-far"></canvas>
+  <canvas id="sky-drift"></canvas>
   <canvas id="sky-back"></canvas>
 </div>
 <canvas class="sky-front" id="sky-front" aria-hidden="true"></canvas>
@@ -1477,8 +1479,10 @@ const resting = (s, to, near) => Math.abs(s.x - to) < near && Math.abs(s.v) < ne
 // a while on top of a room, or of a card on its own. Nothing falls between you and the desk: big,
 // blurred ones close up would have to pass in front of the terminal panel, and the page can't draw
 // over it, so they'd seem to slip behind it, which nothing close to you could do. A moving hand
-// stirs them, a carried card more so, and a card landing knocks them off its room. The button in
-// the bar picks the season and how many fall, and the desk remembers.
+// stirs them, a carried card more so, and a card landing knocks them off its room. What lands on
+// the ground stays, piling up into a drift along the bottom that grows the longer the desk is left
+// alone (see "the drift"). The button in the bar picks the season and how many fall, and the desk
+// remembers.
 
 // Shapes a unit tall, pointing up: a sakura petal with the notch at its tip. A Japanese maple
 // leaf is seven pointed lobes meeting at (cx, cy), the middle one longest.
@@ -1513,19 +1517,21 @@ function seeded(a) {   // mulberry32: the same stars and the same branch every t
 
 const sky = (() => {
   const TAU = Math.PI * 2;
-  const cv = { stars: $("#sky-stars"), branch: $("#sky-branch"), back: $("#sky-back"), front: $("#sky-front") };
+  const cv = { stars: $("#sky-stars"), branch: $("#sky-branch"), far: $("#sky-far"), drift: $("#sky-drift"),
+               back: $("#sky-back"), front: $("#sky-front") };
   const g = Object.fromEntries(Object.entries(cv).map(([k, c]) => [k, c.getContext("2d")]));
   // Per season: what falls, its tints (hue, saturation, lightness), and how it moves compared with
-  // a cherry petal: how many, how big, how fast it falls, how much it turns over. In snow, some of
-  // the middle flakes (glint: the share of them) catch the light now and then.
+  // a cherry petal: how many, how big, how fast it falls, how much it turns over, and how fast what
+  // lands piles up (pile). In snow, some of the middle flakes (glint: the share of them) catch the
+  // light now and then.
   const SEASONS = {
-    sakura: { glyph: "桜", shape: "petal", count: 1, size: 1, fall: 1, spin: 1,
+    sakura: { glyph: "桜", shape: "petal", count: 1, size: 1, fall: 1, spin: 1, pile: 1,
               tints: [[345, 100, 95], [340, 100, 92], [336, 95, 89], [332, 92, 86], [328, 85, 83], [350, 70, 94]] },
-    momiji: { glyph: "楓", shape: "maple", count: .55, size: 1.45, fall: 1.3, spin: 1.2,
+    momiji: { glyph: "楓", shape: "maple", count: .55, size: 1.45, fall: 1.3, spin: 1.2, pile: 1.2,
               tints: [[358, 80, 50], [8, 88, 54], [18, 92, 56], [28, 95, 58], [38, 95, 60], [345, 70, 42]] },
-    yuki: { glyph: "雪", shape: "flake", count: 1.8, size: .5, fall: .6, spin: 0, glint: .25,
+    yuki: { glyph: "雪", shape: "flake", count: 1.8, size: .5, fall: .6, spin: 0, glint: .25, pile: 1.2,
             tints: [[330, 60, 98], [250, 60, 97], [210, 70, 97]] },
-    hotaru: { glyph: "蛍", shape: "glow", count: .55, size: 1.8, fall: 0, spin: 0,
+    hotaru: { glyph: "蛍", shape: "glow", count: .55, size: 1.8, fall: 0, spin: 0, pile: 0,
               tints: [[48, 100, 72], [40, 100, 68], [54, 100, 78]] },
   };
   const AMOUNT = { off: 0, calm: 44, lively: 120 };     // on a window of about 1400 x 850
@@ -1606,6 +1612,7 @@ const sky = (() => {
       };
       return { sharp: pair(false), soft: pair(true) };
     });
+    weave();
     document.documentElement.dataset.season = prefs.season;
   }
 
@@ -1622,8 +1629,11 @@ const sky = (() => {
     return base * (.75 + .6 * noise(T * .11)) + 22 * noise(T * .37 + 40) + gust;
   }
 
-  const hand = { x: -1e4, y: -1e4, vx: 0, vy: 0, t: 0 };
+  // bare: over the empty desk, not a card, a room or a control, so a quick pass scoops at the drift.
+  const hand = { x: -1e4, y: -1e4, vx: 0, vy: 0, t: 0, bare: false };
+  const BARE = "html, body, #rooms, .lobby, .empty";
   addEventListener("pointermove", (e) => {
+    hand.bare = e.pointerType === "mouse" && e.target.matches?.(BARE);
     const now = performance.now(), dt = (now - hand.t) / 1000;
     if (dt > 0 && dt < .1) {
       hand.vx += ((e.clientX - hand.x) / Math.max(dt, .008) - hand.vx) * .5;
@@ -1633,7 +1643,7 @@ const sky = (() => {
     hand.y = e.clientY;
     hand.t = now;
   }, { passive: true });
-  document.documentElement.addEventListener("pointerleave", () => { hand.x = hand.y = -1e4; hand.vx = hand.vy = 0; });
+  document.documentElement.addEventListener("pointerleave", () => { hand.x = hand.y = -1e4; hand.vx = hand.vy = 0; hand.bare = false; });
 
   // ---- what falls ----
 
@@ -1651,7 +1661,7 @@ const sky = (() => {
       flip: turn ? Math.random() * TAU : 0, flipTo: 0, spin, flipV: spin,
       tilt: turn ? Math.random() * TAU : 0, tiltV: (Math.random() - .5) * 2.2 * turn,
       x: 0, y: 0, vx: 0, vy: 0, fade: 1, squash: 1, life: Infinity, front: false,
-      on: null, lx: 0, rest: 0, lands: false, groundY: H, retire: false,
+      on: null, lx: 0, rest: 0, lands: false, sink: 0, retire: false,
       seed: Math.random() * 200, wander: 0, blink: Math.random() * TAU, blinkV: .8 + Math.random() * 1.8,
       glint: layer === "mid" && Math.random() < (season.glint || 0), shine: 0, shineT: 9, shineAt: T + 2 + Math.random() * 16,
     };
@@ -1663,7 +1673,7 @@ const sky = (() => {
   // side on a strong wind, or else from above the top.
   function place(p, where) {
     const w = wind();
-    Object.assign(p, { on: null, front: false, squash: 1, flipV: p.spin, groundY: H - 3 - Math.random() * 14,
+    Object.assign(p, { on: null, front: false, squash: 1, flipV: p.spin, sink: Math.random() * 6,
                        lands: p.layer === "mid" && !p.glow && Math.random() < .45 });
     if (p.glow) {   // fireflies don't fall: they rise out of the dark low down, and wander
       p.x = Math.random() * VW;
@@ -1696,9 +1706,10 @@ const sky = (() => {
     p.vy = 30 * p.d * p.fall;
   }
 
-  // Coming to rest on a room or a card (on: that element, lx: how far along it) or the ground.
+  // Coming to rest on a room or a card (on: that element, lx: how far along it) for a while, or
+  // on the drift, which it joins as soon as it lies still.
   function settle(p, on, lx) {
-    Object.assign(p, { on, lx, vx: 0, vy: 0, rest: 9 + Math.random() * 14,
+    Object.assign(p, { on, lx, vx: 0, vy: 0, rest: on === "ground" ? .9 + Math.random() * .6 : 9 + Math.random() * 14,
                        flipTo: Math.round(p.flip / Math.PI) * Math.PI + (Math.random() - .5) * .6 });   // face up or down
   }
 
@@ -1709,7 +1720,7 @@ const sky = (() => {
     p.vy = -(40 + Math.random() * 90);
     p.vx = w * .5 + (Math.random() - .5) * 80;
     p.flipV = p.spin * 3;
-    p.lands = Math.random() < .5;
+    p.lands = !p.front && Math.random() < .5;
   }
 
   function recycle(p, i) {
@@ -1718,15 +1729,13 @@ const sky = (() => {
   }
 
   // How many fall: by the setting, the season and the size of the window. Extras fade out.
+  const wanted = () => REDUCED ? 0 : Math.round(AMOUNT[prefs.amount] * season.count * clamp(VW * H / (1400 * 850), .6, 1.4));
   function populate(fade) {
-    const area = clamp(VW * H / (1400 * 850), .6, 1.4);
-    const want = REDUCED ? 0 : Math.round(AMOUNT[prefs.amount] * season.count * area);
-    const live = parts.filter((p) => !p.retire);
-    for (const p of parts) if (p.retire && live.length < want) Object.assign(p, { retire: false, life: Infinity }), live.push(p);
+    const want = wanted(), live = parts.filter((p) => !p.retire);
+    for (const p of parts) if (p.retire && live.length < want) Object.assign(p, { retire: false, loose: false, life: Infinity }), live.push(p);
     for (let i = live.length; i < want; i++) {
       const p = spawn(null, "anywhere");
       p.fade = fade;
-      if (p.lands && Math.random() < .25) { p.y = p.groundY; settle(p, "ground", p.x); }
       parts.push(p);
     }
     for (const p of live.slice(want)) Object.assign(p, { retire: true, life: Math.min(p.life, .8 + Math.random()) });
@@ -1757,6 +1766,9 @@ const sky = (() => {
     const w0 = wind(), speed = Math.hypot(hand.vx, hand.vy);
     const carrying = document.body.classList.contains("dragging"), R = carrying ? 190 : 110;
     const kx = 1 - Math.exp(-dt * 1.8), ky = 1 - Math.exp(-dt * 1.5), ease = 1 - Math.exp(-dt * 6);
+    if (hand.bare && speed > 380 && drifting() && hand.x > 0 && hand.x < VW && hand.y > surface(hand.x) - 24) {
+      scoop(hand.x, 34, speed * dt * .15, hand.vx * .35);
+    }
     for (let i = parts.length - 1; i >= 0; i--) {
       const p = parts[i];
       if (p.life !== Infinity) {
@@ -1786,19 +1798,23 @@ const sky = (() => {
         p.shine = p.shineT < .24 ? p.shineT / .24 : Math.max(0, 1 - (p.shineT - .24) / 1);
       }
 
-      if (p.on) {   // resting: it lies flat, and fades before it goes
+      if (p.on) {   // resting: it lies flat, and on a room or a card fades before it goes
         p.flip += (p.flipTo - p.flip) * ease;
         p.squash += (.45 - p.squash) * ease;
         p.rest -= dt;
-        p.fade = Math.min(p.fade, 1, p.rest / 2.5);
-        if (p.on !== "ground") {
+        if (p.on === "ground") p.y = surface(p.x) + p.sink - p.size * .1;
+        else {
+          p.fade = Math.min(p.fade, 1, p.rest / 2.5);
           const r = rects.get(p.on);
           if (!r || p.on.classList.contains("lifted")) { fall(p, 0); continue; }
           p.x = r.left + p.lx;
           p.y = r.top + .5 - p.size * .1;
         }
         if (Math.abs(w) > 120 && Math.random() < dt * .5) fall(p, w);
-        else if (p.rest <= 0) recycle(p, i);
+        else if (p.rest <= 0) {
+          if (p.on === "ground") bake(p);
+          recycle(p, i);
+        }
         continue;
       }
 
@@ -1843,9 +1859,281 @@ const sky = (() => {
       p.squash += (1 - p.squash) * ease;
       if (p.fade < 1 && p.life === Infinity) p.fade = Math.min(1, p.fade + dt * 1.5);
       if (caught) continue;
-      if (p.lands && p.vy > 0 && p.y >= p.groundY) { p.y = p.groundY; settle(p, "ground", p.x); }
+      if (p.lands && p.vy > 0 && p.x > 0 && p.x < W && p.y >= surface(p.x) + p.sink - p.size * .1) {
+        if (drifting() && Math.random() < .35 + .9 * lie(p.x)) settle(p, "ground", p.x);   // it gathers more in some places
+        else p.lands = false;
+      }
       else if (p.y > H + 60 || p.y < -H || p.x < -VW * .3 - 40 || p.x > VW * 1.3 + 40) recycle(p, i);
     }
+  }
+
+  // ---- the drift ----
+
+  // Whatever lands on the ground stays, piling up along the bottom of the window. The drift is a
+  // height every few pixels: a petal that has settled is drawn into the drift's own canvas where it
+  // lies and raises the heights under it, and wherever the slope gets steeper than loose petals
+  // hold, some slide down it. That canvas is drawn again only when the drift changes, so a tall
+  // drift costs no more each frame than none at all. Left alone the desk gathers it higher and
+  // higher, up to about a third of the window; time it spent hidden or closed counts too, as if
+  // they'd kept falling. A quick hand through the drift, or a gust, sends some flying. Each season
+  // keeps a drift of its own, and the desk remembers them.
+  const COL = 4, LIP = 4, BED = 10, KEEP = 260;   // px a height covers; the floor's lip; how deep the top's petals lie; fallen ones kept as they lay
+  const DRIFTS = "tatami-drift", LANDS = .0105;   // where it's kept; about how many land a second, for each one falling
+  const DUNES = Array.from({ length: 64 }, seeded(19));
+  let heights = new Float32Array(0), stamps = [], tile = null, tileDPR = 0, landOwed = 0, flyOwed = 0;
+  let driftDirty = false, driftDrawn = 0, driftMoved = false, driftKept = 0, hiddenAt = 0;
+  const drifting = () => season.pile > 0 && prefs.amount !== "off" && !REDUCED;
+
+  function lie(x) {   // 0..1: how readily things gather here, the drift's slow rise and fall along the floor
+    const u = x / 260, i = Math.floor(u), f = u - i, s = f * f * (3 - 2 * f);
+    const a = DUNES[i & 63], b = DUNES[(i + 1) & 63];
+    return a + (b - a) * s;
+  }
+  const ceiling = (x) => H * .36 * (.7 + .3 * lie(x));   // as high as it gets here
+  function heightAt(x) {
+    const n = heights.length;
+    if (n < 2) return 0;
+    const u = clamp(x / COL, 0, n - 1), i = Math.min(Math.floor(u), n - 2);
+    return heights[i] + (heights[i + 1] - heights[i]) * (u - i);
+  }
+  const surface = (x) => H - LIP - heightAt(x);   // the drift's top at x, on the page
+  const fadeAt = (d) => clamp(1 - (d - BED) / 12, 0, 1);   // what's this deep in it shows through the ones on top
+
+  // Adds this much (px²) under x, spread over half px either side, no higher than the ceiling.
+  function heap(x, area, half) {
+    const n = heights.length, c = x / COL, r = half / COL;
+    const a = Math.max(0, Math.ceil(c - r)), b = Math.min(n - 1, Math.floor(c + r));
+    const peak = area / half;   // a raised cosine's area is its peak times its half-width
+    for (let i = a; i <= b; i++) {
+      const k = .5 + .5 * Math.cos((i - c) / r * Math.PI);
+      heights[i] = Math.min(heights[i] + peak * k, Math.max(heights[i], ceiling(i * COL)));
+    }
+    slide(a, b);
+    driftMoved = driftDirty = true;
+  }
+
+  // Loose petals hold a slope of about 30°: wherever it's steeper, some slide down to the lower
+  // side. Then the bumps settle a little into their neighbours, so it stays soft.
+  const settled = new Float32Array(64);
+  function slide(a, b) {
+    const n = heights.length, most = COL * .58;
+    for (let pass = 0; pass < 8; pass++) {
+      let moved = false;
+      for (let i = Math.max(0, a - 2 - pass * 2), hi = Math.min(n - 2, b + 1 + pass * 2); i <= hi; i++) {
+        const d = heights[i] - heights[i + 1];
+        if (Math.abs(d) <= most) continue;
+        const m = (Math.abs(d) - most) / 2 * Math.sign(d);
+        heights[i] -= m;
+        heights[i + 1] += m;
+        moved = true;
+      }
+      if (!moved) break;
+    }
+    const lo = Math.max(1, a - 3), hi = Math.min(n - 2, b + 3, lo + settled.length - 1);
+    for (let i = lo; i <= hi; i++) settled[i - lo] = (heights[i - 1] - 2 * heights[i] + heights[i + 1]) * .15;
+    for (let i = lo; i <= hi; i++) heights[i] += settled[i - lo];
+  }
+
+  // A petal that's lying still on the drift becomes part of it, drawn in at once just as it lies.
+  function bake(p) {
+    const s = { x: p.x, y: p.y, hy: H - LIP - p.y, rot: p.rot, flip: p.flip, tilt: p.tilt, squash: p.squash,
+                size: p.size, look: p.look, alpha: p.alpha, fade: 1, glow: false, shine: 0 };
+    stamps.push(s);
+    if (stamps.length > KEEP) stamps.shift();
+    heap(p.x, 5.5 * p.size / season.size * season.pile, Math.max(14, p.size * 1.2));
+    draw(g.drift, s);
+  }
+
+  // Petals taken off the top fly: about one for every petal's worth, while there aren't too many.
+  function scatter(took, at, vx) {
+    let flying = 0;
+    for (const p of parts) flying += p.loose ? 1 : 0;
+    for (flyOwed += took / 60; flyOwed >= 1 && flying < 50; flyOwed--, flying++) {
+      const p = spawn("mid", "anywhere"), x = at();
+      Object.assign(p, { x, y: surface(x) - 2, vx: vx + (Math.random() - .5) * 140, vy: -(140 + Math.random() * 260),
+                         fade: 1, flipV: p.spin * 3, lands: Math.random() < .7, retire: true, loose: true });
+      parts.push(p);
+    }
+    flyOwed = Math.min(flyOwed, 1);
+  }
+
+  // A quick hand through the drift scoops some off the top where it passes.
+  function scoop(x, half, most, vx) {
+    const n = heights.length, c = x / COL, r = half / COL;
+    const a = Math.max(0, Math.ceil(c - r)), b = Math.min(n - 1, Math.floor(c + r));
+    let took = 0;
+    for (let i = a; i <= b; i++) {
+      const d = Math.min(heights[i], most * (.5 + .5 * Math.cos((i - c) / r * Math.PI)));
+      heights[i] -= d;
+      took += d * COL;
+    }
+    if (took < .5) return;
+    slide(a, b);
+    driftMoved = driftDirty = true;
+    scatter(took, () => x + (Math.random() - .5) * half * 1.6, vx);
+  }
+
+  // A gust takes a share of the whole drift's top, and blows it along.
+  function blowOff(share) {
+    let took = 0;
+    for (let i = 0; i < heights.length; i++) {
+      const d = heights[i] * share;
+      heights[i] -= d;
+      if (i * COL < VW) took += d * COL;
+    }
+    if (took < .5) return;
+    driftMoved = driftDirty = true;
+    scatter(Math.min(took, 50 * 60), () => Math.random() * VW, wind() * 1.5);
+  }
+
+  // As if they'd kept falling all along: about as many as would have landed in that time, at
+  // random along the floor, more where it gathers. Stops once it's as high as it gets.
+  function accrue(sec) {
+    if (!drifting() || !(sec > 0) || heights.length < 2) return;
+    let due = sec * wanted() * LANDS * season.fall, room = 0;
+    for (let i = 0; i < heights.length; i++) room += Math.max(0, ceiling(i * COL) - heights[i]);
+    due = Math.min(due, room * COL / (5.5 * 14 * season.pile) * 1.6 + 1);   // past full, the rest would only slide off
+    for (landOwed += due; landOwed >= 1; landOwed--) {
+      let x = Math.random() * W;
+      while (Math.random() > .35 + .9 * lie(x)) x = Math.random() * W;
+      const z = .36 + Math.random() * .4, size = 7 + z ** 2.2 * 26;
+      heap(x, 5.5 * size * season.pile, Math.max(14, size * season.size * 1.2));
+    }
+  }
+
+  function keepDrift(name = prefs.season) {
+    driftMoved = false;
+    driftKept = performance.now();
+    if (!SEASONS[name].pile || heights.length < 2) return;
+    try {
+      const all = JSON.parse(localStorage.getItem(DRIFTS)) || {};
+      all[name] = { at: Date.now(), h: Array.from(heights, Math.round) };
+      localStorage.setItem(DRIFTS, JSON.stringify(all));
+    } catch { /* private window */ }
+  }
+
+  // This season's drift as it was left, grown by however long it's been when the desk opens (not
+  // when you come back to a season you'd changed from: nothing was falling then).
+  function loadDrift(grown = true) {
+    heights = new Float32Array(Math.ceil(W / COL) + 1);
+    stamps = [];
+    landOwed = 0;
+    driftDirty = true;
+    if (!season.pile) return;
+    let was = null;
+    try { was = (JSON.parse(localStorage.getItem(DRIFTS)) || {})[prefs.season]; } catch { /* nothing saved */ }
+    if (was?.h?.length > 1) stretch(was.h);
+    if (was?.at && grown) accrue((Date.now() - was.at) / 1000);
+  }
+
+  function stretch(from) {   // a drift onto the window's width now, keeping its shape
+    const n = heights.length, m = from.length;
+    for (let i = 0; i < n; i++) {
+      const u = i / Math.max(1, n - 1) * (m - 1), j = Math.min(Math.floor(u), m - 2);
+      heights[i] = Math.min(from[j] + (from[j + 1] - from[j]) * (u - j), H * .4);
+    }
+  }
+
+  // The drift's inside: a tile of petals packed close over a deeper shade of them, the same every time.
+  function weave() {
+    tile = null;
+    if (!season.pile) return;
+    const S = 150, c = document.createElement("canvas"), x = c.getContext("2d"), r = seeded(5);
+    c.width = c.height = Math.round(S * DPR);
+    const [h, sat, l] = season.tints[Math.floor(season.tints.length / 2)], snow = season.shape === "flake";
+    x.fillStyle = snow ? `hsl(${h}, ${sat * .3}%, ${l * .66}%)` : `hsl(${h}, ${sat * .45}%, ${l * .4}%)`;
+    x.fillRect(0, 0, c.width, c.height);
+    for (let i = 0; i < S * S / 50; i++) {
+      const z = .36 + r() * .4, size = (7 + z ** 2.2 * 26) * season.size, D = size / .7;
+      const p = { x: r() * S, y: r() * S, size, look: looks[(r() * looks.length) | 0].sharp, alpha: .5 + r() * .4, fade: 1,
+                  rot: r() * TAU, flip: (r() < .5 ? 0 : Math.PI) + (r() - .5) * .8, tilt: r() * TAU, squash: .45, glow: false, shine: 0 };
+      for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) {   // wrapping round, so the tile repeats seamlessly
+        if (p.x + dx > -D && p.x + dx < S + D && p.y + dy > -D && p.y + dy < S + D) draw(x, { ...p, x: p.x + dx, y: p.y + dy });
+      }
+    }
+    tileDPR = DPR;
+    tile = g.drift.createPattern(c, "repeat");
+    tile.setTransform(new DOMMatrix().scale(1 / DPR));
+  }
+
+  const shadeCanvas = document.createElement("canvas");
+  function drawDrift() {
+    driftDirty = false;
+    driftDrawn = performance.now();
+    const x = g.drift, n = heights.length;
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    x.globalCompositeOperation = "source-over";
+    x.clearRect(0, 0, x.canvas.width, x.canvas.height);
+    if (!drifting() || !tile || n < 2) return;
+    let tall = 0;
+    for (let i = 0; i < n; i++) tall = Math.max(tall, heights[i]);
+    if (tall < .5 && !stamps.length) return;
+    const base = H - LIP;
+    // Its inside, reaching up to just under the petals lying on top, and darker the deeper it
+    // goes under them: the outline of the top again and again, further down each time.
+    const outline = (down) => {
+      x.beginPath();
+      x.moveTo(0, H + 2);
+      for (let i = 0; i < n; i++) x.lineTo(i * COL, Math.min(H + 2, base - heights[i] + down));
+      x.lineTo((n - 1) * COL, H + 2);
+      x.closePath();
+    };
+    x.setTransform(DPR, 0, 0, DPR, 0, 0);
+    outline(BED * .6);
+    x.globalAlpha = .92;
+    x.fillStyle = tile;
+    x.fill();
+    x.globalAlpha = 1;
+    // The shade is drawn small and blurred, then laid over it stretched, so it deepens smoothly.
+    const sh = shadeCanvas.getContext("2d"), q = 1 / 8;
+    shadeCanvas.width = Math.ceil(W * q) + 2;
+    shadeCanvas.height = Math.ceil(H * q) + 2;
+    sh.setTransform(q, 0, 0, q, 0, 0);
+    sh.filter = "blur(1px)";
+    sh.fillStyle = "rgba(17, 12, 23, .13)";
+    for (const down of [9, 16, 26, 40, 58, 82, 115, 160]) {
+      if (down > tall + 4) break;
+      sh.beginPath();
+      sh.moveTo(0, H + 40);
+      for (let i = 0; i < n; i += 2) sh.lineTo(i * COL, base - heights[i] + down);
+      sh.lineTo((n - 1) * COL, H + 40);
+      sh.closePath();
+      sh.fill();
+    }
+    x.globalCompositeOperation = "source-atop";
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    x.imageSmoothingQuality = "high";
+    x.drawImage(shadeCanvas, 0, 0, shadeCanvas.width, shadeCanvas.height, 0, 0, shadeCanvas.width / q * DPR, shadeCanvas.height / q * DPR);
+    x.globalCompositeOperation = "source-over";
+    // Its top: petals lying every which way, each layer fixed where it formed, and the ones that
+    // really fell, just where they lay. The deeper ones show through less.
+    const lying = [], G = 10, STEP = 5, kind = Object.keys(SEASONS).indexOf(prefs.season) + 1;
+    const many = Math.max(1, Math.round(1 / season.size));   // small ones lie thicker: snow, two a layer
+    for (let j = 0; j * G < W; j++) {
+      const hx = heightAt(j * G + G / 2);
+      if (hx < 1) continue;
+      for (let L = Math.max(0, Math.floor((hx - BED - 14) / STEP)), last = Math.floor(hx / STEP); L <= last; L++) {
+        const r = seeded(j * 7919 + L * 104729 + kind * 15485863);
+        for (let k = 0; k < many; k++) {
+          const px = j * G + r() * G, hy = (L + r()) * STEP, d = heightAt(px) - hy;
+          const z = .36 + r() * .4, look = looks[(r() * looks.length) | 0];
+          const rot = r() * TAU, flip = (r() < .5 ? 0 : Math.PI) + (r() - .5) * .6, tilt = r() * TAU;
+          if (d < 0 || d > BED + 12) continue;
+          lying.push({ x: px, y: base - hy, size: (7 + z ** 2.2 * 26) * season.size, look: look.sharp, alpha: .85, fade: fadeAt(d),
+                       rot, flip, tilt, squash: .45, glow: false, shine: 0 });
+        }
+      }
+    }
+    stamps = stamps.filter((s) => {
+      const d = heightAt(s.x) - s.hy;
+      if (d < -3 || d > BED + 12) return false;   // scooped away, or buried
+      s.y = base - s.hy;
+      s.fade = fadeAt(d);
+      lying.push(s);
+      return true;
+    });
+    lying.sort((a, b) => b.y - a.y);   // the deepest first, so the ones above lie over them
+    for (const p of lying) draw(x, p);
   }
 
   // ---- drawing ----
@@ -1890,13 +2178,15 @@ const sky = (() => {
     return c;
   })();
 
+  // Far ones fall behind the drift; middle ones in front of it, or of a room's glass.
   function render() {
-    for (const x of [g.back, g.front]) {
+    for (const x of [g.far, g.back, g.front]) {
       x.setTransform(1, 0, 0, 1, 0, 0);
       x.clearRect(0, 0, x.canvas.width, x.canvas.height);
       x.globalCompositeOperation = season.shape === "glow" ? "lighter" : "source-over";
     }
-    for (const p of parts) draw(p.front || (p.on && p.on !== "ground") ? g.front : g.back, p);
+    for (const p of parts) draw(p.front || (p.on && p.on !== "ground") ? g.front : p.layer === "far" ? g.far : g.back, p);
+    if (driftDirty && performance.now() - driftDrawn > 70) drawDrift();
   }
 
   // ---- the moon, the stars and the branch, drawn once (again on a resize) ----
@@ -2138,11 +2428,13 @@ const sky = (() => {
     }
     // With the desk in the background, every other frame is plenty.
     if (!document.hasFocus() && (odd = !odd)) return void requestAnimationFrame(frame);
-    const dt = clamp((now - last) / 1000, 0, 1 / 20);
+    const gap = Math.max(0, (now - last) / 1000), dt = Math.min(gap, 1 / 20);
     last = now;
     T += dt;
+    if (gap > .5) accrue(gap - dt);   // frames came slowly (the window was covered, say): the drift still grew
     step(dt);
     render();
+    if (driftMoved && now - driftKept > 20000) keepDrift();
     requestAnimationFrame(frame);
   }
 
@@ -2157,16 +2449,20 @@ const sky = (() => {
       top = $(".bar").getBoundingClientRect().bottom;
       DPR = Math.min(devicePixelRatio || 1, 1.5);
       const hi = Math.min(devicePixelRatio || 1, 2);
-      for (const [c, k] of [[cv.stars, hi], [cv.branch, hi], [cv.back, DPR], [cv.front, DPR]]) {
+      for (const [c, k] of [[cv.stars, hi], [cv.branch, hi], [cv.far, DPR], [cv.drift, DPR], [cv.back, DPR], [cv.front, DPR]]) {
         c.width = Math.round(W * k);
         c.height = Math.round(H * k);
       }
       drawStars();
       drawBranch();
-      for (const p of parts) {
-        p.groundY = H - 3 - Math.random() * 14;
-        if (p.on === "ground") p.y = p.groundY;
+      if (heights.length && heights.length !== Math.ceil(W / COL) + 1) {   // the drift spreads or bunches up to fit
+        const was = Array.from(heights);
+        heights = new Float32Array(Math.ceil(W / COL) + 1);
+        stretch(was);
+        stamps = [];
       }
+      if (tileDPR !== DPR) weave();
+      drawDrift();
       render();
     });
   }
@@ -2180,10 +2476,19 @@ const sky = (() => {
       VW = W;
       top = $(".bar").getBoundingClientRect().bottom;
       resize();
-      requestAnimationFrame(() => { populate(1); render(); wake(); });   // once the canvases have their size
+      requestAnimationFrame(() => { loadDrift(); populate(1); render(); wake(); });   // once the canvases have their size
       $("#sky").classList.toggle("still", prefs.amount === "off");
       addEventListener("resize", resize);
-      document.addEventListener("visibilitychange", () => { if (!document.hidden) { drawStars(); wake(); } });
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) { hiddenAt = Date.now(); keepDrift(); return; }
+        if (hiddenAt) accrue((Date.now() - hiddenAt) / 1000);   // it went on gathering while you were away
+        hiddenAt = 0;
+        last = performance.now();
+        drawStars();
+        render();
+        wake();
+      });
+      addEventListener("pagehide", () => keepDrift());
       setInterval(drawStars, 30 * 60 * 1000);   // the moon moves on
     },
     resize,
@@ -2192,9 +2497,13 @@ const sky = (() => {
       Object.assign(prefs, next);
       keep();
       if (prefs.season !== was.season) {
+        keepDrift(was.season);
         parts = [];
         dress();
+        loadDrift(false);
       }
+      keepDrift();   // from now: while there's none, none gathers
+      driftDirty = true;
       if (prefs.season !== was.season || prefs.branch !== was.branch) { drawStars(); drawBranch(); }
       $("#sky").classList.toggle("still", prefs.amount === "off");
       populate(0);
@@ -2237,6 +2546,7 @@ const sky = (() => {
           parts.push(p);
         }
       }
+      if (drifting()) blowOff(.12 * power / 220);   // and lifts some off the top of the drift
       wake();
     },
   };
