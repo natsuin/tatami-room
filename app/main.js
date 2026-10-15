@@ -404,7 +404,7 @@ function checkUpdate(s) {
   if (ready && Notification.isSupported()) {
     const n = new Notification({ title: "Tatami Room has an update", icon: ICON,
       body: "Click to restart it now. Your agents keep running in their terminals." });
-    n.on("click", restart);
+    n.on("click", () => restart());   // not restart itself: it would take the click's event for `opening`
     n.show();
   }
 }
@@ -524,12 +524,12 @@ function createTray() {
 function trayMenu() {
   if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
-    ...(updateReady ? [{ label: "Restart to update (agents keep running)", click: restart }, { type: "separator" }] : []),
+    ...(updateReady ? [{ label: "Restart to update (agents keep running)", click: () => restart() }, { type: "separator" }] : []),
     { label: "Open the desk", click: showDesk },
     { label: "+ Claude", click: newClaude },
     { label: "+ Claude in a Terminal window", click: newWindow },
     { type: "separator" },
-    ...(updateReady ? [] : [{ label: "Restart Tatami Room (agents keep running)", click: restart }]),
+    ...(updateReady ? [] : [{ label: "Restart Tatami Room (agents keep running)", click: () => restart() }]),
     { label: "Quit Tatami Room", click: quit },
   ]));
 }
