@@ -325,7 +325,7 @@ ELECTRON = ("v44.4.3", "790a355b684d5c7cc8dc3cdd8c4cca7c4b2d054685427c7554a95687
 APP_EXE = "Tatami Room.exe"
 # Tatami Room's mark, for tatami.ico: each mat's top-left corner (34 x 10, in board.html's #mark units) and colour.
 MARK = ((24, 24, (142, 203, 255)), (30, 38, (195, 166, 255)), (36, 52, (255, 133, 192)), (42, 66, (255, 195, 138)))
-APP_FILES = ("package.json", "main.js", "preload.js", "helper.ps1", "terminal.html", "terminal.js",
+APP_FILES = ("package.json", "main.js", "preload.js", "helper.ps1", "hold.vbs", "terminal.html", "terminal.js",
              "terminal-preload.js", "vendor/xterm.js", "vendor/xterm.css", "vendor/addon-fit.js",
              "vendor/LICENSE-xterm", "vendor/LICENSE-addon-fit")  # the app's own code, in this repo's app/ folder
 

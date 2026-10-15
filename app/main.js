@@ -352,13 +352,15 @@ function quit() {
 }
 
 // Restart: the app's newest code from the repo (waifu sync-app), then the app again. Its terminals keep running
-// and it attaches to them again. A short wsl.exe of its own holds WSL up while the app is away. `opening`: the app
-// is only just starting (see start), so it starts again as it was asked to, once, with --updated.
+// and it attaches to them again. A short wsl.exe of its own holds WSL up while the app is away, started hidden by
+// hold.vbs (see there). `opening`: the app is only just starting (see start), so it starts again as it was asked
+// to, once, with --updated.
 async function restart(opening = false) {
   if (restarting) return;
   restarting = true;
   await tatami(["sync-app"], 30000);
-  spawn("wsl.exe", ["-d", CONFIG.distro, "--", "sleep", "45"], { windowsHide: true, detached: true, stdio: "ignore" }).unref();
+  spawn("wscript.exe", ["//B", "//Nologo", path.join(__dirname, "hold.vbs"), CONFIG.distro],
+    { windowsHide: true, detached: true, stdio: "ignore" }).unref();
   saveBounds();
   const args = process.argv.slice(1).filter((a) => a !== "--updated");
   app.relaunch({ args: opening ? [...args, "--updated"] : args.filter((a) => a !== "--new-claude" && a !== "--background") });
