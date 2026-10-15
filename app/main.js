@@ -241,7 +241,7 @@ function layout(slide = false) {
   const place = (x) => panel.setBounds({ x, y: HEAD, width, height: Math.max(0, h - HEAD) });
   clearInterval(sliding);
   panel.setVisible(!!shown && !tucked);
-  win.webContents.send("tatami:panel", width, tucked);
+  win.webContents.send("tatami:panel", width, tucked, shown || "");   // and whose terminal it is, for its card
   if (!slide || !width) return place(w - width);
   const start = Date.now();
   place(w);

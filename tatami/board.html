@@ -737,6 +737,24 @@ body.stale main { opacity: .5; filter: saturate(.4); }
 .agent:focus-visible { outline-offset: 4px; }
 .agent.is-target { --accent: var(--sakura); --grow: 1.04; --air: .4; }   /* on its own, about to team up with the one carried */
 .agent.carried { --accent: var(--sakura); --lift: -6px; --grow: 1.04; --air: .8; }   /* picked up with the keyboard */
+/* Whose terminal is in the panel beside the desk: a ring in its own colour, set off the card like
+   a selection, springing in as it comes on screen. Its chip has a small window with the panel
+   side filled in (see markOnScreen). */
+.agent.on-screen .face {
+  outline: 2px solid color-mix(in oklab, var(--hue) 70%, white);
+  outline-offset: 4px;
+  animation: on-screen .5s var(--bounce);
+}
+@keyframes on-screen { from { outline-color: transparent; outline-offset: 12px; } }
+.agent.on-screen .chip.kind::before {
+  content: "";
+  flex: none;
+  width: 11px;
+  height: 8px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+  background: linear-gradient(to right, transparent 50%, currentColor 50%);
+}
 /* The place a carried card left: an empty outline where it will come back if you let go. */
 .agent.lifted .face {
   background: rgba(255, 228, 244, .02);
@@ -1237,12 +1255,17 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 const TOKEN = "__TOKEN__";
 const APP = window.tatami;   // set inside the Tatami Room app (its preload.js); absent in a browser
 if (APP) document.documentElement.classList.add("app");
-APP?.onPanel?.((width, held) => {   // the desk makes room for the terminal panel, and its cards glide over
+let onScreen = "";   // the session whose terminal is in the panel, "" while it's closed (see markOnScreen)
+APP?.onPanel?.((width, held, session = "") => {   // the desk makes room for the terminal panel, and its cards glide over
   const at = snapshot();
   document.documentElement.style.setProperty("--panel", `${width}px`);
   glide(at);
   sky.resize();   // and the moon and branch move over with it
   if (!held) panelBack(width);
+  if (session !== onScreen) {
+    onScreen = session;
+    for (const card of agentEls.values()) markOnScreen(card);
+  }
 });
 // Who made each kind of agent: its name on the card, and a small mark in its colour. They come
 // from kinds.json, where a new kind of agent is added: { claude: { name, color, line, d }, ... }.
@@ -2652,9 +2675,10 @@ function fillCard(card, a, lead = false) {
   const letters = unread === 1 ? "1 room message it hasn't read" : `${unread} room messages it hasn't read`;
   card.title = (a.summary ? `${a.summary}\n` : "") + "Click to bring up its window, drag to move it"
     + (unread ? `\n${letters}` + (a.status === "done" ? ": it reads them when you next talk to it" : "") : "");
-  // Where it runs, when that's inside the app, and whose helper it is. What kind of agent it is
-  // sits above its name.
-  $(".kind", card).textContent = a.helper_of ? `Helper of ${nameOf(a.helper_of)}` : a.session ? "In the app" : "";
+  // Where it runs, when that's inside the app (or on screen there: see markOnScreen), and whose
+  // helper it is. What kind of agent it is sits above its name.
+  card.dataset.session = a.session || "";
+  card.dataset.helperOf = a.helper_of ? nameOf(a.helper_of) : "";
   $(".lead", card).textContent = lead ? "Orchestrator" : "";   // the room's, picked in its header
   card.classList.toggle("is-lead", lead);
   $(".maker-name", card).textContent = company;
@@ -2678,14 +2702,15 @@ function fillCard(card, a, lead = false) {
   card.dataset.status = status ? a.status : "";
   card.toggleAttribute("data-read", !!a.read);   // its turn, and you've already brought it up
   $(".state", card).textContent = status || "";
-  card.setAttribute("aria-label", `${name}, ${company}${a.model ? ` ${a.model}` : ""} agent, `
+  card.dataset.label = `${name}, ${company}${a.model ? ` ${a.model}` : ""} agent, `
                                   + (effort < 0 ? "" : `${a.effort} effort, `)
                                   + (a.task ? `on task ${a.task.id}, ${a.task.title}, ` : a.summary ? `working on ${a.summary}, ` : "")
                                   + (tree ? `in its worktree on ${tree.branch}${tree.ahead ? ` with ${tree.ahead} commits to land` : ""}, `
                                     : `folder ${a.folder || "unknown"}, `)
                                   + (a.room ? `in room ${a.room}` : "on its own") + (lead ? ", the room's orchestrator" : "")
                                   + (status ? `, ${status}` : "")
-                                  + (a.helper_of ? `, helper of ${nameOf(a.helper_of)}` : "") + (unread ? `, ${letters}` : ""));
+                                  + (a.helper_of ? `, helper of ${nameOf(a.helper_of)}` : "") + (unread ? `, ${letters}` : "");
+  markOnScreen(card);
   const img = $(".girl", card);
   const src = a.girl ? `/girl/${encodeURIComponent(a.id)}?token=${encodeURIComponent(TOKEN)}` : "";
   if (img.dataset.src !== src) {
@@ -2693,6 +2718,17 @@ function fillCard(card, a, lead = false) {
     img.hidden = true;               // shown again once it loads
     if (src) img.src = src; else img.removeAttribute("src");
   }
+}
+
+// The agent whose terminal is in the app's panel beside the desk: a ring in its own colour, set
+// off its card the way a selection is, and "On screen" where its card says it's in the app. Not
+// a glow: a glow says an agent is waiting on you.
+function markOnScreen(card) {
+  const on = !!onScreen && card.dataset.session === onScreen;
+  card.classList.toggle("on-screen", on);
+  $(".kind", card).textContent = card.dataset.helperOf ? `Helper of ${card.dataset.helperOf}`
+    : on ? "On screen" : card.dataset.session ? "In the app" : "";
+  card.setAttribute("aria-label", (card.dataset.label || "") + (on ? ", its terminal on screen" : ""));
 }
 
 // The window tints are very dark; the same hue, light, is the agent's text colour.
