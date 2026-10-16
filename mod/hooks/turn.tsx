@@ -5,10 +5,12 @@
 // the desk's sky blue for half a minute, then holding still until the next turn starts (band.tsx
 // draws it). The row of a tool waiting for your OK gets a red frame that pulses quickly until you
 // answer. A terminal can't blur a glow, so a border steps through lighter and darker shades.
+// Once you say yes, the frame goes and the desk hears it's working, however long the tool runs.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, Timer } from 'claude-code'
 
 import type { Finished } from '../types'
+import { answered } from './status'
 
 export const SKY = ['#8ecbff', '#a9d8ff', '#c6e6ff', '#a9d8ff', '#8ecbff', '#6faee6', '#5193cc', '#6faee6']
 export const AKA = ['#ff4d5e', '#ff8792', '#ff4d5e', '#b8222f']
@@ -25,6 +27,7 @@ let busy = false
 // (a tool call waiting for your OK) can read an atom as it was when the hook started.
 let running = '' // the newest tool call under way: the one a permission prompt is about
 let waitingOn = '' // the one waiting for your OK
+let started = '' // the one whose row was drawn running: you said yes (a drawing can't write, so the beat acts)
 let breatheUntil = 0
 let beating: Timer | null = null
 
@@ -51,6 +54,11 @@ async function pace($: EngineInterface) {
 }
 
 async function step($: EngineInterface) {
+  if (waitingOn !== '' && started === waitingOn) {
+    await setWaiting($, '') // you said yes and it runs: the frame goes
+    await answered($) // and the desk's card says it's working again
+    return
+  }
   if (waitingOn === '' && breatheUntil <= (await $.clock.now())) {
     return pace($) // done breathing: hold its own colour
   }
@@ -81,12 +89,14 @@ export function turn(on: On, glows: boolean) {
 
   on('turn.complete', async ($, e, next) => {
     busy = false
-    if (!glows || e.agentId !== undefined) {
+    if (e.agentId !== undefined) {
       return next(e) // a subagent's turn ends inside Claude's own
     }
     if (waitingOn !== '') {
-      waitingOn = ''
-      await update($, asking, () => '')
+      await setWaiting($, '')
+    }
+    if (!glows) {
+      return next(e)
     }
     if (e.isAborted) {
       await setFinished($, null) // you stopped it yourself: nothing to point out
@@ -96,10 +106,8 @@ export function turn(on: On, glows: boolean) {
     return next(e)
   })
 
-  if (!glows) {
-    return
-  }
-
+  // Who's waiting for your OK is followed with the glow option off too: the desk needs to hear
+  // when you answer.
   on('tool.call', async ($, e, next) => {
     const id = e.tool_use_id ?? ''
     running = id
@@ -107,7 +115,7 @@ export function turn(on: On, glows: boolean) {
       return await next(e)
     } finally {
       if (id !== '' && waitingOn === id) {
-        await setWaiting($, '') // answered (and run, or refused): the frame goes
+        await setWaiting($, '') // refused, or run before the beat saw it start: the frame goes
       }
     }
   })
@@ -120,10 +128,19 @@ export function turn(on: On, glows: boolean) {
   })
 
   // The waiting tool's own row, framed. It stays in sight just above the permission dialog,
-  // which hides the band above the prompt.
+  // which hides the band above the prompt. The engine draws the row again, running, as soon as
+  // you say yes: then it's drawn as it is, and the next beat (a quarter second at most) clears
+  // the rest.
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
     const id = await read($, asking)
     if (id === '' || e.props.tool_use_id !== id) {
+      return next(e)
+    }
+    if (e.props.isRunning) {
+      started = id
+      return next(e)
+    }
+    if (!glows) {
       return next(e)
     }
     const { Box, Text } = $.ui.resolve(e)

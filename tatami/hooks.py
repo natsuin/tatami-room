@@ -2,7 +2,8 @@
 """Tatami Room status hooks, so the board can show which agents need you.
 
 Claude Code runs this on a few events: when you send a prompt, after each tool it uses,
-when it finishes its turn, and when it's waiting for you to OK something. Each time it
+when it finishes its turn, and when it's waiting for you to OK something (and the mod adds
+one of its own, PermissionGranted, as the tool you OK'd starts to run). Each time it
 notes the agent's state in one small file (~/.local/state/tatami/status/<agent id>.json):
 
   working   Claude is busy
@@ -53,7 +54,8 @@ import work  # the room's plan, for what's left when a turn ends
 
 SETTINGS = os.path.expanduser("~/.claude/settings.json")
 COMMAND = '"$HOME/.local/bin/tatami" hook'  # through the link, so moving the repo can't break it
-EVENTS = {"UserPromptSubmit": "working", "PostToolUse": "working", "Stop": "done", "Notification": None}
+EVENTS = {"UserPromptSubmit": "working", "PostToolUse": "working", "PermissionGranted": "working", "Stop": "done",
+          "Notification": None}
 ASKING = {"permission_prompt", "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input"}
 
 

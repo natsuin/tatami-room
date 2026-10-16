@@ -1,5 +1,6 @@
 import type { On, RenderElement } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
 import { AKA, SKY, took } from '../hooks/turn'
 import type { Snapshot } from '../types'
@@ -14,11 +15,15 @@ const BAND = {
   props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} },
 } as const
 
-// The engine beneath the mod: just enough of it for the glows' calls.
-function engine(on: On, snap: () => Snapshot = () => QUIET) {
+// The engine beneath the mod: just enough of it for the glows' calls. `events` collects what the
+// desk is told (`tatami mod event`).
+function engine(on: On, snap: () => Snapshot = () => QUIET, events: string[] = []) {
   const clock = mock.clock(on)
   mock.env(on, { HOME: '/home/test' })
   on('process.run', async (_$, e) => {
+    if (e.argv[2] === 'event') {
+      events.push((JSON.parse(e.init?.stdin ?? '{}') as { hook_event_name: string }).hook_event_name)
+    }
     const stdout = e.argv[2] === 'poll' ? JSON.stringify(snap()) : '{}'
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -28,6 +33,7 @@ function engine(on: On, snap: () => Snapshot = () => QUIET) {
   on('turn.start', async (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', async (_$, e) => ({ text: e.answer }))
   on('classic.Notification', async () => ({}))
+  on('classic.PostToolUse', async () => ({}))
   // What the engine draws where the mod passes: a tool's own row; nothing above the prompt.
   on('ui.render', async ($r, e) => {
     const { Text } = $r.ui.resolve(e)
@@ -101,30 +107,43 @@ test('the box sits above room mail, and a turn you stopped yourself shows none',
   await after.unmount()
 })
 
-test('a tool waiting for your OK pulses red, quicker, until you answer', async ($, on) => {
-  const clock = engine(on)
-  let id = ''
-  let answer = () => {}
+// The engine holds a tool call at its permission prompt until `answer` lets it go.
+function prompt(on: On) {
+  const held = { id: '', answer: () => {} }
   on('tool.call', async (_$, e) => new Promise(resolve => {
-    id = e.tool_use_id ?? ''
-    answer = () => resolve({ result: { stdout: '', stderr: '', interrupted: false } })
+    held.id = e.tool_use_id ?? ''
+    held.answer = () => resolve({ result: { stdout: '', stderr: '', interrupted: false } })
   }))
-  await $.session.start(START)
-  await clock.advance(0)
-  await $.turn.start({ text: 'install it', turnId: 't1' })
+  return held
+}
 
+// A call that asks for your OK. While it waits, the engine draws its row not running; the
+// moment you say yes, running.
+async function asked($: Parameters<TestBody>[0], held: ReturnType<typeof prompt>) {
   const call = $.tool.call({ tool: 'Bash', command: 'npm install' })
-  for (let i = 0; i < 100 && id === ''; i++) {
+  for (let i = 0; i < 100 && held.id === ''; i++) {
     await Promise.resolve()
   }
   await $.classic.Notification({ notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' })
+  const id = held.id
+  const props = { tool_use_id: id, tool: 'Bash', input: { command: 'npm install' }, isRunning: false, isErrored: false, isInterrupted: false }
+  const row = await $.ui.mount({ plugin: 'tatami', surface: 'terminal', component: 'ToolUse', requestId: id, props })
+  return { row, props, call, answer: () => held.answer() }
+}
 
-  const row = await $.ui.mount({
-    plugin: 'tatami', surface: 'terminal', component: 'ToolUse', requestId: id,
-    props: { tool_use_id: id, tool: 'Bash', input: { command: 'npm install' }, isRunning: true, isErrored: false, isInterrupted: false },
-  })
+const FRAME = { type: 'Text', text: '● Needs your OK' } as const
+
+test('a tool waiting for your OK pulses red, quicker, until you say yes, and the desk hears it then', async ($, on) => {
+  const events: string[] = []
+  const clock = engine(on, () => QUIET, events)
+  const held = prompt(on)
+  await $.session.start(START)
+  await clock.advance(0)
+  await $.turn.start({ text: 'install it', turnId: 't1' })
+  const { row, props, call, answer } = await asked($, held)
+
   const border = async () => (await row.findAll({ type: 'Box' })).find(b => b.props.borderStyle === 'bold')?.props.borderColor
-  expect(await row.find({ type: 'Text', text: '● Needs your OK' })).toBeDefined()
+  expect(await row.find(FRAME)).toBeDefined()
   expect(await row.find({ type: 'Text', text: '● Bash(npm install)' })).toBeDefined() // the engine's own row, inside
   const shades = new Set([await border()])
   for (let i = 0; i < 3; i++) {
@@ -133,10 +152,58 @@ test('a tool waiting for your OK pulses red, quicker, until you answer', async (
   }
   expect(shades.size).toBe(3)
   expect([...shades].every(s => AKA.includes(s as string))).toBe(true)
+  expect(events).not.toContain('PermissionGranted')
+
+  // Yes: the tool starts, and may run for minutes. The frame goes now, and the desk hears it
+  // within a beat, long before the tool is done.
+  await row.redraw({ ...props, isRunning: true })
+  expect(await row.find(FRAME)).toBeUndefined()
+  await clock.advance(275)
+  expect(events.filter(e => e === 'PermissionGranted')).toEqual(['PermissionGranted'])
+  await clock.advance(10_000)
+  await row.redraw({ ...props, isRunning: true })
+  expect(await row.find(FRAME)).toBeUndefined()
+  expect(events.filter(e => e === 'PermissionGranted').length).toBe(1)
 
   answer()
   await call
-  expect(await row.find({ type: 'Text', text: '● Needs your OK' })).toBeUndefined()
+  expect(await row.find(FRAME)).toBeUndefined()
+  await row.unmount()
+})
+
+test('a tool you refuse loses its frame without the desk hearing a yes', async ($, on) => {
+  const events: string[] = []
+  const clock = engine(on, () => QUIET, events)
+  const held = prompt(on)
+  await $.session.start(START)
+  await clock.advance(0)
+  await $.turn.start({ text: 'install it', turnId: 't1' })
+  const { row, call, answer } = await asked($, held)
+  expect(await row.find(FRAME)).toBeDefined()
+
+  answer() // No: the call ends without its row ever being drawn running
+  await call
+  await clock.advance(1_000)
+  expect(await row.find(FRAME)).toBeUndefined()
+  expect(events).not.toContain('PermissionGranted')
+  await row.unmount()
+})
+
+test('with the glow option off there is no frame, but the desk still hears your yes', { options: { glow: false } }, async ($, on) => {
+  const events: string[] = []
+  const clock = engine(on, () => QUIET, events)
+  const held = prompt(on)
+  await $.session.start(START)
+  await clock.advance(0)
+  await $.turn.start({ text: 'install it', turnId: 't1' })
+  const { row, props, call, answer } = await asked($, held)
+  expect(await row.find(FRAME)).toBeUndefined()
+
+  await row.redraw({ ...props, isRunning: true })
+  await clock.advance(275)
+  expect(events).toContain('PermissionGranted')
+  answer()
+  await call
   await row.unmount()
 })
 

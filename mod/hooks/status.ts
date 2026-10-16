@@ -39,6 +39,13 @@ function told(out: HookOut): string[] {
   return text ? [text] : []
 }
 
+/** You said yes to the tool call it asked about, and it runs (turn.tsx sees it start): the desk
+ * hears it's working now, not once the tool finishes, minutes later for a long one. */
+export async function answered($: EngineInterface) {
+  await record($, { hook_event_name: 'PermissionGranted' }, false)
+  state = 'working'
+}
+
 export function status(on: On, chime: boolean) {
   on('classic.UserPromptSubmit', async ($, e, next) => {
     const r = await next(e)
