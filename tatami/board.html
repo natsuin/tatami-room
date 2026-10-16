@@ -177,6 +177,35 @@ h1 { margin: 0; font: 650 1.2rem/1 var(--display); letter-spacing: -.02em; white
 .usage-text span:last-child em { color: var(--fuji); }
 .usage-text span[data-level="high"] em { color: var(--kaki); }
 .usage-text span[data-level="full"] em { color: var(--beni); }
+/* The bell beside them: hovering the usage brings it out, and on, it stays out, lit, and pings you
+   (a Windows notification) when a window resets. */
+.ping {
+  display: grid;
+  place-items: center;
+  width: 0;
+  height: 28px;
+  margin-left: -9px;   /* folded away, it takes no gap either */
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(255, 228, 244, .07);
+  color: var(--muted);
+  opacity: 0;
+  cursor: pointer;
+  transition: width .35s var(--glide), margin .35s var(--glide), opacity .2s ease, background .2s ease, color .2s ease,
+              box-shadow .3s ease;
+}
+.ping[hidden] { display: none; }
+.ping svg { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7;
+            stroke-linecap: round; stroke-linejoin: round; transform-origin: 50% 12%; }
+.usage:hover .ping, .ping:focus-visible, .ping[aria-pressed="true"] { width: 28px; margin-left: 0; opacity: 1; }
+.ping:hover { background: rgba(255, 228, 244, .13); color: var(--text); }
+.ping[aria-pressed="true"] { color: var(--sakura); background: rgba(255, 133, 192, .14);
+                             box-shadow: 0 0 14px -2px rgba(255, 133, 192, .55); }
+.ping[aria-pressed="true"] svg { fill: currentColor; }
+.ping:focus-visible { outline: 2px solid var(--sakura); outline-offset: 1px; }
+.app .bar .usage { -webkit-app-region: no-drag; }   /* a drag region never sees the pointer, so never :hover */
 
 .add {
   flex: none;
@@ -1119,6 +1148,9 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
       <circle class="track" cx="18" cy="18" r="9.6"/><circle class="ring" cx="18" cy="18" r="9.6" pathLength="100"/>
     </svg>
     <span class="usage-text"><span></span><span></span></span>
+    <button class="ping" id="ping" type="button" aria-pressed="false" aria-label="Ping me when my usage resets" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/></svg>
+    </button>
   </div>
   <div class="skyctl" id="skyctl">
     <button class="sky-button" id="sky-button" type="button" lang="ja" aria-expanded="false" aria-controls="sky-panel"
@@ -2408,8 +2440,80 @@ function showUsage(u) {
     name.textContent = label;
     value.textContent = `${pct}%`;
     lines[i].replaceChildren(name, " ", value, w.resets ? `, resets ${resetTime(w.resets, weekly)}` : "");
+    if (w.resets) resetsDue.set(k, { at: w.resets, used: w.used });
   });
+  lastUsage = u;
+  checkResets();
 }
+
+// ---- the bell: a ping when your usage resets ----
+
+// On (kept in this browser), it pings you as each window you've used starts over, with a Windows
+// notification. The reset times are known ahead, so it goes by the clock: no status line needs to
+// come in at the moment it resets.
+const pingButton = $("#ping");
+const resetsDue = new Map();   // "five_hour" / "seven_day" -> { at: when it resets (epoch s), used: % last seen }
+let lastUsage = {};
+let pingOn = (() => { try { return localStorage.getItem("tatami-ping-resets") === "1"; } catch { return false; } })();
+
+// Worth a ping: a window you used. The 5 hours starting over is no news while the week is used up.
+function worthPinging(k, w) {
+  const week = lastUsage.seven_day;
+  return w.used >= 1 && !(k === "five_hour" && week?.used >= 100 && week.resets > w.at);
+}
+
+function nextPing() {
+  const now = Date.now() / 1000;
+  const [k, w] = [...resetsDue].filter(([key, d]) => d.at > now && worthPinging(key, d))
+    .sort((a, b) => a[1].at - b[1].at)[0] || [];
+  return k && `${k === "five_hour" ? "5h" : "week"}, ${resetTime(w.at, k === "seven_day")}`;
+}
+
+function checkResets() {
+  const now = Date.now() / 1000;
+  for (const [k, w] of resetsDue) {
+    if (w.at > now) continue;
+    resetsDue.delete(k);
+    if (pingOn && worthPinging(k, w)) ping(k, w);
+  }
+  const next = nextPing();
+  pingButton.setAttribute("aria-pressed", String(pingOn));
+  pingButton.title = pingOn ? `Pinging you when your usage resets${next ? ` (next: ${next})` : ""}. Click to stop.`
+                            : "Ping me when my usage resets";
+}
+setInterval(checkResets, 15000);
+
+function ping(k, w) {
+  const name = k === "five_hour" ? "5-hour" : "weekly";
+  try {
+    const n = new Notification("Your Claude usage reset", {
+      body: `Your ${name} window is fresh again (it was at ${Math.round(w.used)}%).`, tag: `tatami-reset-${k}` });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch { /* notifications aren't on offer here after all */ }
+  swing();
+}
+
+function swing() {
+  if (REDUCED) return;
+  pingButton.firstElementChild.animate(
+    [{ rotate: "0deg" }, { rotate: "20deg" }, { rotate: "-15deg" }, { rotate: "9deg" }, { rotate: "-4deg" }, { rotate: "0deg" }],
+    { duration: 900, easing: "ease-out" });
+}
+
+pingButton.hidden = !("Notification" in window);
+pingButton.addEventListener("click", async () => {
+  const on = !pingOn;
+  if (on && Notification.permission !== "granted" && await Notification.requestPermission() !== "granted") {
+    return toast("Notifications are blocked for the desk, so it can't ping you.");
+  }
+  pingOn = on;
+  try { localStorage.setItem("tatami-ping-resets", on ? "1" : "0"); } catch { /* private window: on until it closes */ }
+  checkResets();
+  if (!on) return toast("No more pings when your usage resets.");
+  swing();
+  const next = nextPing();
+  toast(`The desk will ping you when your usage resets${next ? ` (next: ${next})` : ""}.`);
+});
 
 function resetTime(epoch, weekly) {
   const d = new Date(epoch * 1000);
