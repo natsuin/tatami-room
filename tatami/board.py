@@ -506,6 +506,12 @@ class Board(BaseHTTPRequestHandler):
             if f:
                 with open(f, "rb") as fh:
                     return self.send(200, fh.read(), "image/png")
+        if path.startswith("/sky/"):  # the sky's paintings (tatami/sky/*.webp)
+            name = path[len("/sky/"):]
+            f = os.path.join(HERE, "sky", name)
+            if re.fullmatch(r"[a-z0-9-]+\.webp", name) and os.path.isfile(f):
+                with open(f, "rb") as fh:
+                    return self.send(200, fh.read(), "image/webp")
         return self.send(404, {"error": "not found"})
 
     def events(self):

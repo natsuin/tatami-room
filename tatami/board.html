@@ -1178,6 +1178,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
         <label class="sky-toggle"><input type="checkbox" id="sky-branch-toggle"> Branch and moon</label>
         <button class="add quiet" id="sky-gust" type="button" title="Send a gust of wind through the sky">Gust</button>
       </div>
+      <label class="sky-toggle" title="A painted ink wash branch for each season, instead of the drawn one">
+        <input type="checkbox" id="sky-ink-toggle"> Ink wash painting</label>
     </div>
   </div>
   <div class="addctl" id="addctl">
@@ -1586,11 +1588,12 @@ const sky = (() => {
   const AMOUNT = { off: 0, calm: 44, lively: 120 };     // on a window of about 1400 x 850
   const BREEZE = { off: 0, calm: .16, lively: .34 };
 
-  const prefs = { season: "sakura", amount: "calm", branch: true };
+  const prefs = { season: "sakura", amount: "calm", branch: true, ink: true };
   try { Object.assign(prefs, JSON.parse(localStorage.getItem("tatami-sky")) || {}); } catch { /* nothing saved */ }
   if (!SEASONS[prefs.season]) prefs.season = "sakura";
   if (!(prefs.amount in AMOUNT)) prefs.amount = "calm";
   prefs.branch = prefs.branch !== false;
+  prefs.ink = prefs.ink !== false;
   const keep = () => { try { localStorage.setItem("tatami-sky", JSON.stringify(prefs)); } catch { /* private window */ } };
 
   let season = SEASONS[prefs.season], looks = [];
@@ -1954,6 +1957,51 @@ const sky = (() => {
     for (const p of parts) draw(p.front || (p.on && p.on !== "ground") ? g.front : g.back, p);
   }
 
+  // ---- the ink wash paintings: a branch painted for each season, in place of the drawn one ----
+
+  // Each was painted on a 16:9 sheet hanging from its top right corner: how far down it starts (fy) and
+  // how much of the sheet's width it takes (fw). Summer is the cherry in leaf, at night.
+  const INK = { sakura: { fy: .003, fw: .697 }, momiji: { fy: .001, fw: .698 }, yuki: { fy: 0, fw: .698 }, hotaru: { fy: 0, fw: .709 } };
+  const inkImgs = {};
+  function inkImg(name) {
+    if (!inkImgs[name]) {
+      const img = inkImgs[name] = new Image();
+      img.onload = () => { if (prefs.season === name && prefs.ink) { drawStars(); drawBranch(); } };
+      img.src = `/sky/ink-${name}.webp?token=${encodeURIComponent(TOKEN)}`;
+    }
+    return inkImgs[name];
+  }
+  // Where this season's painting hangs, once it has loaded: from the right edge, as much of the window's
+  // width as it took of its sheet (a bit less), never taller than about half the sky under the bar, and
+  // never blown up much past its own size.
+  function inkPlace() {
+    if (!prefs.ink || !prefs.branch) return null;
+    const img = inkImg(prefs.season), at = INK[prefs.season];
+    if (!img.complete || !img.naturalWidth) return null;
+    const ratio = img.naturalHeight / img.naturalWidth;
+    const w = Math.min(VW * at.fw * .62, (H - top) * .55 / ratio, img.naturalWidth * 1.3), h = w * ratio;
+    return { img, x: VW - w, y: top - 6 + at.fy * H * .4, w, h };
+  }
+  // Where a painting lets go of what falls: its pink blossom, red leaves or snow (anywhere painted, if none).
+  const LETS_GO = { sakura: (r, g, b) => r > 170 && r - g > 30, momiji: (r, g, b) => r > 130 && r - g > 40,
+                    yuki: (r, g, b) => r > 200 && g > 200 && b > 200 };
+  function blossomsFrom({ img, x: bx, y: by, w, h }) {
+    const c = document.createElement("canvas"), x = c.getContext("2d", { willReadFrequently: true });
+    c.width = 64;
+    c.height = Math.max(8, Math.round(64 * h / w));
+    x.drawImage(img, 0, 0, c.width, c.height);
+    const d = x.getImageData(0, 0, c.width, c.height).data, test = LETS_GO[prefs.season], any = [];
+    for (let j = 0; j < c.height; j++) {
+      for (let i = 0; i < c.width; i++) {
+        const p = (j * c.width + i) * 4, at = { x: bx + (i + .5) / c.width * w, y: by + (j + .5) / c.height * h };
+        if (d[p + 3] < 140) continue;
+        any.push(at);
+        if (test?.(d[p], d[p + 1], d[p + 2])) blossoms.push(at);
+      }
+    }
+    if (!blossoms.length) blossoms.push(...any);
+  }
+
   // ---- the moon, the stars and the branch, drawn once (again on a resize) ----
 
   function moonPhase(now = Date.now()) {   // 0 new, .5 full: days since a known new moon, over the synodic month
@@ -1971,13 +2019,32 @@ const sky = (() => {
   // like to be that keeps clear of every bough and blossom, even while a gust shakes them.
   let moonSpot = null;
   function moonAt() {
-    const key = `${VW} ${H} ${top}`;
+    const ink = inkPlace(), key = `${VW} ${H} ${top} ${ink ? prefs.season : ""}`;
     if (moonSpot?.key === key) return moonSpot;
     const r = clamp(VW * .021, 17, 32), wantX = VW * .8, wantY = clamp(H * .2, top + 70, 230);
     const { boughs, clusters, k } = branchShape();
+    // A painting's branch, as the middles of the 8 px squares where it's painted.
+    const painted = [];
+    if (ink) {
+      const G = 8, c = document.createElement("canvas"), x = c.getContext("2d", { willReadFrequently: true });
+      c.width = Math.ceil(ink.w / G);
+      c.height = Math.ceil(ink.h / G);
+      x.drawImage(ink.img, 0, 0, c.width, c.height);
+      const a = x.getImageData(0, 0, c.width, c.height).data;
+      for (let j = 0; j < c.height; j++) {
+        for (let i = 0; i < c.width; i++) if (a[(j * c.width + i) * 4 + 3] > 24) painted.push([ink.x + (i + .5) * G, ink.y + (j + .5) * G]);
+      }
+    }
     // From a point to the nearest bark or petal, giving up once it's closer than `need`.
     const roomAt = (px, py, need = -Infinity) => {
       let room = Infinity;
+      if (ink) {
+        for (const [cx, cy] of painted) {
+          room = Math.min(room, Math.hypot(px - cx, py - cy) - 6);
+          if (room < need) return room;
+        }
+        return room;
+      }
       for (const { pts, wid } of boughs) {
         for (let i = 1; i < pts.length; i++) {
           const [ax, ay] = pts[i - 1], [bx, by] = pts[i], dx = bx - ax, dy = by - ay;
@@ -2096,6 +2163,14 @@ const sky = (() => {
     blossoms = [];
     if (!prefs.branch) return;
     x.setTransform(k0, 0, 0, k0, 0, 0);
+    if (prefs.ink) {   // the painting, once it's here (it asks for a redraw when it arrives)
+      const ink = inkPlace();
+      if (ink) {
+        x.drawImage(ink.img, ink.x, ink.y, ink.w, ink.h);
+        blossomsFrom(ink);
+      }
+      return;
+    }
     const { boughs, clusters, rnd, k } = branchShape();
     x.lineCap = x.lineJoin = "round";
     const snowy = prefs.season === "yuki";
@@ -2250,7 +2325,7 @@ const sky = (() => {
         parts = [];
         dress();
       }
-      if (prefs.season !== was.season || prefs.branch !== was.branch) { drawStars(); drawBranch(); }
+      if (prefs.season !== was.season || prefs.branch !== was.branch || prefs.ink !== was.ink) { drawStars(); drawBranch(); }
       $("#sky").classList.toggle("still", prefs.amount === "off");
       populate(0);
       render();
@@ -3508,6 +3583,7 @@ function skyOpen(open) {
   $("#sky-moon").replaceChildren(name, `${m.en}, ${m.lit}% lit tonight`);
   for (const r of skyPanel.querySelectorAll("input[type=radio]")) r.checked = sky.prefs[r.name] === r.value;
   $("#sky-branch-toggle").checked = sky.prefs.branch;
+  $("#sky-ink-toggle").checked = sky.prefs.ink;
   if (!REDUCED) {
     skyPanel.animate([{ opacity: 0, transform: "translateY(-8px) scale(.96)" }, { opacity: 1, transform: "none" }],
                      { duration: 460, easing: BOUNCE });
@@ -3524,6 +3600,7 @@ skyPanel.addEventListener("change", (e) => {
   const t = e.target;
   if (t.type === "radio") sky.set({ [t.name]: t.value });
   else if (t.id === "sky-branch-toggle") sky.set({ branch: t.checked });
+  else if (t.id === "sky-ink-toggle") sky.set({ ink: t.checked });
   skyButton.textContent = sky.glyph();
 });
 $("#sky-gust").addEventListener("click", () => sky.gust(220));
