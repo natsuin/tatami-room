@@ -1693,18 +1693,23 @@ const sky = (() => {
     return base * (.75 + .6 * noise(T * .11)) + 22 * noise(T * .37 + 40) + gust;
   }
 
-  const hand = { x: -1e4, y: -1e4, vx: 0, vy: 0, t: 0 };
+  // The hand's speed comes from one move to the next over the desk, never across the gap where it
+  // was gone (back in, it would seem to have flown in from far off and fling everything near it), and
+  // never more than HAND px/s, so a jumpy move can't either.
+  const hand = { x: -1e4, y: -1e4, vx: 0, vy: 0, t: 0 }, HAND = 2400;
   addEventListener("pointermove", (e) => {
     const now = performance.now(), dt = (now - hand.t) / 1000;
-    if (dt > 0 && dt < .1) {
+    if (hand.t && dt > 0 && dt < .1) {
       hand.vx += ((e.clientX - hand.x) / Math.max(dt, .008) - hand.vx) * .5;
       hand.vy += ((e.clientY - hand.y) / Math.max(dt, .008) - hand.vy) * .5;
+      const v = Math.hypot(hand.vx, hand.vy);
+      if (v > HAND) { hand.vx *= HAND / v; hand.vy *= HAND / v; }
     }
     hand.x = e.clientX;
     hand.y = e.clientY;
     hand.t = now;
   }, { passive: true });
-  document.documentElement.addEventListener("pointerleave", () => { hand.x = hand.y = -1e4; hand.vx = hand.vy = 0; });
+  document.documentElement.addEventListener("pointerleave", () => { hand.x = hand.y = -1e4; hand.vx = hand.vy = hand.t = 0; });
 
   // ---- what falls ----
 
