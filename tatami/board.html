@@ -1743,10 +1743,12 @@ const sky = (() => {
     const w = wind(), panel = VW < W - 1;
     Object.assign(p, { on: null, front: false, squash: 1, flipV: p.spin, groundY: H - 3 - Math.random() * 14,
                        lands: p.layer === "mid" && !p.glow && Math.random() < (season.heap ? .75 : .45) });
-    if (p.glow) {   // fireflies don't fall: they rise out of the dark low down, and wander
+    if (p.glow) {   // fireflies don't fall: a new one rises in from below the bottom, lighting up, then wanders
       p.x = Math.random() * VW;
-      p.y = where === "anywhere" ? H * (.25 + Math.random() * .75) : H * (.45 + Math.random() * .55);
-      p.vx = p.vy = 0;
+      p.y = where === "anywhere" ? H * (.25 + Math.random() * .75) : H + 8 + Math.random() * 16;
+      p.vx = 0;
+      p.vy = where === "anywhere" ? 0 : -20;
+      p.rise = where !== "anywhere";
       if (where !== "anywhere") p.fade = 0;
       return;
     }
@@ -1882,18 +1884,18 @@ const sky = (() => {
         continue;
       }
 
-      if (p.glow) {   // a firefly wanders on its own slow path, blinking, and keeps out of the top
+      if (p.glow) {   // a firefly wanders on its own slow path, blinking, and keeps out of the top; a new one rises first
         p.wander += dt * .22;
+        if (p.rise && p.y < H * .8) p.rise = false;
         const ax = noise(p.wander + p.seed) * 28 + w * .12;
-        const ay = noise(p.wander * 1.3 + p.seed + 50) * 18 + (p.y < H * .2 ? 25 : 0);
+        const ay = noise(p.wander * 1.3 + p.seed + 50) * 18 + (p.y < H * .2 ? 25 : p.rise ? -26 : 0);
         p.vx += (ax - p.vx) * kx;
         p.vy += (ay - p.vy) * ky;
         p.x += p.vx * dt;
         p.y += p.vy * dt;
         p.blink += p.blinkV * dt;
         if (p.fade < 1) p.fade = Math.min(1, p.fade + dt * .5);
-        if (p.x < -40) p.x = VW + 40; else if (p.x > VW + 40) p.x = -40;
-        if (p.y > H + 30) p.y = H * (.5 + Math.random() * .4);
+        if (p.x < -40 || p.x > VW + 40 || p.y < -40 || p.y > H + 40) recycle(p, i);   // off the desk: gone, and a new one rises
         continue;
       }
 
