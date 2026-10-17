@@ -1367,13 +1367,16 @@ async function api(path, body) {
 }
 
 // The board sends its state each time it changes (server-sent events), and nothing in between.
+let boardWasDown = false;   // the board went away: once it's back (perhaps a newer one), the sky asks again
 function listen() {
   const stream = new EventSource(`/api/events?token=${encodeURIComponent(TOKEN)}`);
   stream.onmessage = (e) => {
     setStatus("live");
+    if (boardWasDown) { boardWasDown = false; sky.retry(); }
     if (epoch % 2 === 0) show(JSON.parse(e.data));   // not while one of our own changes is on its way
   };
   stream.onerror = () => {
+    boardWasDown = true;
     if (stream.readyState !== EventSource.CLOSED) return setStatus("offline");   // it reconnects itself
     stream.close();   // refused, or gone: find out which, and try again soon
     poll();
@@ -2320,6 +2323,12 @@ const sky = (() => {
       setInterval(drawStars, 30 * 60 * 1000);   // the moon moves on
     },
     resize,
+    // A painting the board couldn't give (it was an older board): ask again. Until it's here, the drawn
+    // branch stays; it swaps in when it loads.
+    retry() {
+      for (const [name, img] of Object.entries(inkImgs)) if (img.failed) delete inkImgs[name];
+      if (prefs.ink && prefs.branch) inkImg(prefs.season);
+    },
     set(next) {
       const was = { ...prefs };
       Object.assign(prefs, next);
