@@ -397,7 +397,9 @@ h1 { margin: 0; font: 650 1.2rem/1 var(--display); letter-spacing: -.02em; white
 
 .lobby { padding: 24px var(--gutter) 6px; }
 .lobby[hidden] { display: none; }
-.lobby .cards {   /* no room around them: a frame shows only while a card is carried here */
+.lobby .cards {   /* no room around them: a frame, as wide as their row, shows only while a card is carried here */
+  width: fit-content;
+  max-width: 100%;
   padding: 14px;
   border-radius: 30px;
   transition: box-shadow .35s var(--glide), background .35s var(--glide);
@@ -1106,6 +1108,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 .toast[hidden] { display: none; }
 @media (max-width: 720px) {
   :root { --card-w: 100%; }
+  .lobby .cards { width: auto; }   /* cards as wide as the screen need a row that is too */
   .bar:not(.app .bar) { flex-wrap: wrap; }
   .agent.is-lead { margin: 0 0 8px; }   /* a row of its own, its teammates under it */
 }
