@@ -1966,7 +1966,10 @@ const sky = (() => {
   function inkImg(name) {
     if (!inkImgs[name]) {
       const img = inkImgs[name] = new Image();
-      img.onload = () => { if (prefs.season === name && prefs.ink) { drawStars(); drawBranch(); } };
+      img.onload = img.onerror = (e) => {   // here, or not to be had (an older board): the drawn branch then
+        img.failed = e.type === "error";
+        if (prefs.season === name && prefs.ink) { drawStars(); drawBranch(); }
+      };
       img.src = `/sky/ink-${name}.webp?token=${encodeURIComponent(TOKEN)}`;
     }
     return inkImgs[name];
@@ -2163,7 +2166,7 @@ const sky = (() => {
     blossoms = [];
     if (!prefs.branch) return;
     x.setTransform(k0, 0, 0, k0, 0, 0);
-    if (prefs.ink) {   // the painting, once it's here (it asks for a redraw when it arrives)
+    if (prefs.ink && !inkImg(prefs.season).failed) {   // the painting, once it's here (it asks for a redraw then)
       const ink = inkPlace();
       if (ink) {
         x.drawImage(ink.img, ink.x, ink.y, ink.w, ink.h);
