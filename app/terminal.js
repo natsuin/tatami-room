@@ -46,13 +46,29 @@ function make(key) {
     }
     return true;
   });
-  // What it printed before the panel drew it, then whatever came in meanwhile.
+  // What it printed before the panel drew it, then whatever came in meanwhile. It's replayed at
+  // the panel's size, not xterm's 80 x 24: the agent drew it at its own size, and at another one
+  // every line it moved back over lands somewhere else. Then the agent draws its screen afresh,
+  // over anything the replay still got wrong.
   T.backlog(key).then((data) => {
-    if (data) term.write(data);
+    if (key === current) fit.fit();
+    if (data && data.length) {
+      term.write(data);
+      redraw(key);
+    }
     for (const chunk of t.pending) term.write(chunk);
     t.pending = null;
   });
   return t;
+}
+
+// An agent draws its whole screen again when its size changes, and only then. After the app
+// restarts the panel fits the terminal to the size the agent has already, so it's made one column
+// narrower for a moment, then put back. (Two changes that reach it together count as none.)
+function redraw(key) {
+  const t = terms.get(key);
+  T.resize(key, t.term.cols - 1, t.term.rows);
+  setTimeout(() => { if (terms.get(key) === t) T.resize(key, t.term.cols, t.term.rows); }, 250);
 }
 
 // The window tints are very dark; the same hue, light, marks the session in the header.
