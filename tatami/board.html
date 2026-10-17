@@ -1794,7 +1794,7 @@ const sky = (() => {
     for (let i = live.length; i < want; i++) {
       const p = spawn(null, "anywhere");
       p.fade = fade;
-      if (p.lands && Math.random() < .25) { p.y = ground(p); settle(p, "ground", p.x); }
+      if (p.lands && Math.random() < .25) { p.y = p.groundY; settle(p, "ground", p.x); }
       parts.push(p);
     }
     for (const p of live.slice(want)) Object.assign(p, { retire: true, life: Math.min(p.life, .8 + Math.random()) });
@@ -1811,106 +1811,9 @@ const sky = (() => {
       if (!el.isConnected) continue;
       const r = el.getBoundingClientRect();
       rects.set(el, r);
-      if (el.classList.contains("lifted")) caps.delete(el);   // picked up: its snow's knocked off
       if (r.width < 80 || r.top < top + 6 || r.top > H || el.classList.contains("lifted")) continue;
       const room = el.classList.contains("stage"), inset = room ? 34 : 24;   // clear of the round corners
-      ledges.push({ el, r, top: r.top, x0: r.left, left: r.left + inset, right: r.right - inset, cap: room ? 14 : 5 });
-    }
-  }
-
-  // ---- snow lying on the ground and on the rooms and cards ----
-
-  // While it snows, snow builds up: in a few minutes (fewer when it's lively) it fills in to a thin
-  // soft layer, a bank along the bottom of the sky and a cap along the top of each room and card. A
-  // card picked up loses its cap and grows a new one. When the snow stops, it all melts.
-  const SNOW = { ground: 18, room: 7, card: 5.5, fill: { calm: 180, lively: 90 }, melt: 4 };
-  let snow = 0;                 // how far the bank has filled in, 0 to 1
-  const caps = new WeakMap();   // a room's stage or a card -> its cap: { level, seed }
-  try {
-    const kept = JSON.parse(localStorage.getItem("tatami-snow"));   // as it lay when the page last went
-    if (prefs.season === "yuki" && !REDUCED) snow = clamp(+kept?.level || 0, 0, 1);
-  } catch { /* nothing kept */ }
-  const keepSnow = () => { try { localStorage.setItem("tatami-snow", JSON.stringify({ level: snow })); } catch { /* private window */ } };
-  addEventListener("pagehide", keepSnow);
-  document.addEventListener("visibilitychange", () => { if (document.hidden) keepSnow(); });
-
-  const lie = (level) => 1 - (1 - level) ** 2;   // it shows soon, then fills in more slowly
-  function lay(dt) {
-    const fill = prefs.season === "yuki" && !REDUCED && SNOW.fill[prefs.amount];
-    const d = fill ? dt / fill : -dt / SNOW.melt;
-    snow = clamp(snow + d, 0, 1);
-    for (const { el } of ledges) {
-      let c = caps.get(el);
-      if (!c) caps.set(el, c = { level: T < 2 ? snow : 0, seed: Math.random() * 100 });   // there when the page came back
-      c.level = clamp(c.level + d, 0, 1);
-    }
-  }
-  // How deep it lies: on the ground at x, in gentle drifts...
-  function bankAt(x) {
-    return snow && SNOW.ground * lie(snow) * (.62 + .3 * noise(x / 230 + 11) + .08 * noise(x / 45 + 77));
-  }
-  // ...and on a room's or card's top at x (r: where it is), thinning out before its round corners.
-  function capAt(el, x, r) {
-    const c = caps.get(el);
-    if (!c || c.level <= 0) return 0;
-    const room = el.classList.contains("stage"), end = room ? 22 : 15;
-    const u = (x - r.left - end) / Math.max(1, r.width - end * 2);
-    if (u <= 0 || u >= 1) return 0;
-    return (room ? SNOW.room : SNOW.card) * lie(c.level) * Math.min(1, u / .08, (1 - u) / .08) ** .6
-      * (.7 + .2 * noise((x - r.left) / 60 + c.seed) + .1 * noise((x - r.left) / 16 + c.seed * 3));
-  }
-  // Where something lying on the ground lies: anywhere on the snow, never up in the air over it.
-  const ground = (p) => snow > 0 ? Math.max(p.groundY, H - bankAt(p.x)) : p.groundY;
-
-  // Soft white, a little blue lower down, with its top edge catching the moon; now and then a point
-  // on the bank glints. The bank lies behind the rooms; the caps sit in front, on their tops.
-  function drawSnow() {
-    const k = DPR;
-    const layer = (x, top, bottom, deep) => {   // top: points along its top edge; bottom: the line it lies on
-      const fill = x.createLinearGradient(0, Math.min(...top.map((t) => t[1])), 0, bottom);
-      fill.addColorStop(0, "rgba(248, 250, 255, .95)");
-      fill.addColorStop(.4, "rgba(228, 236, 255, .9)");
-      fill.addColorStop(1, "rgba(192, 207, 240, .85)");
-      const shape = new Path2D(), rim = new Path2D();
-      shape.moveTo(top[0][0], bottom);
-      for (const [px, py] of top) { shape.lineTo(px, py); rim.lineTo(px, py); }
-      shape.lineTo(top[top.length - 1][0], bottom);
-      shape.closePath();
-      x.fillStyle = fill;
-      x.shadowColor = "rgba(205, 220, 255, .45)";
-      x.shadowBlur = deep * k;
-      x.fill(shape);
-      x.shadowBlur = 0;
-      x.strokeStyle = "rgba(255, 255, 255, .65)";
-      x.lineWidth = .8;
-      x.stroke(rim);
-    };
-    for (const x of [g.back, g.front]) {
-      x.setTransform(k, 0, 0, k, 0, 0);
-      x.globalCompositeOperation = "source-over";
-      x.globalAlpha = 1;
-    }
-    if (snow > 0) {
-      const top = [];
-      for (let px = 0; px <= VW + 8; px += 8) top.push([px, H - bankAt(px)]);
-      layer(g.back, top, H, 6);
-      const rnd = seeded(2112), x = g.back;   // the glints: the same few spots, each on its own beat
-      x.globalCompositeOperation = "lighter";
-      for (let i = 0; i < VW / 150; i++) {
-        const gx = (i + .2 + rnd() * .6) * 150, beat = 7 + rnd() * 12, t = (T + rnd() * beat) % beat;
-        const shine = (t < .24 ? t / .24 : Math.max(0, 1 - (t - .24))) * lie(snow);
-        if (shine < .02) continue;
-        x.globalAlpha = shine * .55;
-        x.drawImage(GLINT, gx - 6, H - bankAt(gx) * .7 - 6, 12, 12);
-      }
-      x.globalCompositeOperation = "source-over";
-      x.globalAlpha = 1;
-    }
-    for (const { el, r } of ledges) {
-      if (!(caps.get(el)?.level > 0)) continue;
-      const top = [];
-      for (let px = r.left + 12; px <= r.right - 12; px += 4) top.push([px, r.top + 1 - capAt(el, px, r)]);
-      layer(g.front, top, r.top + 1.5, 3);
+      ledges.push({ el, top: r.top, x0: r.left, left: r.left + inset, right: r.right - inset, cap: room ? 14 : 5 });
     }
   }
 
@@ -1919,7 +1822,6 @@ const sky = (() => {
     hand.vx *= Math.exp(-dt * 5);
     hand.vy *= Math.exp(-dt * 5);
     measure();
-    lay(dt);
     const w0 = wind(), speed = Math.hypot(hand.vx, hand.vy);
     const carrying = document.body.classList.contains("dragging"), R = carrying ? 190 : 110;
     const kx = 1 - Math.exp(-dt * 1.8), ky = 1 - Math.exp(-dt * 1.5), ease = 1 - Math.exp(-dt * 6);
@@ -1961,7 +1863,7 @@ const sky = (() => {
           const r = rects.get(p.on);
           if (!r || p.on.classList.contains("lifted")) { fall(p, 0); continue; }
           p.x = r.left + p.lx;
-          p.y = r.top + .5 - p.size * .1 - capAt(p.on, p.x, r);
+          p.y = r.top + .5 - p.size * .1;
         }
         if (Math.abs(w) > 120 && Math.random() < dt * .5) fall(p, w);
         else if (p.rest <= 0) recycle(p, i);
@@ -2009,7 +1911,7 @@ const sky = (() => {
       p.squash += (1 - p.squash) * ease;
       if (p.fade < 1 && p.life === Infinity) p.fade = Math.min(1, p.fade + dt * 1.5);
       if (caught) continue;
-      if (p.lands && p.vy > 0 && p.y >= ground(p)) { p.y = ground(p); settle(p, "ground", p.x); }
+      if (p.lands && p.vy > 0 && p.y >= p.groundY) { p.y = p.groundY; settle(p, "ground", p.x); }
       else if (p.y > H + 60 || p.y < -H || p.x < -VW * .3 - 40 || p.x > VW * 1.3 + 40) recycle(p, i);
     }
   }
@@ -2060,9 +1962,8 @@ const sky = (() => {
     for (const x of [g.back, g.front]) {
       x.setTransform(1, 0, 0, 1, 0, 0);
       x.clearRect(0, 0, x.canvas.width, x.canvas.height);
+      x.globalCompositeOperation = season.shape === "glow" ? "lighter" : "source-over";
     }
-    if (snow > 0) drawSnow();
-    for (const x of [g.back, g.front]) x.globalCompositeOperation = season.shape === "glow" ? "lighter" : "source-over";
     for (const p of parts) draw(p.front || (p.on && p.on !== "ground") ? g.front : g.back, p);
   }
 
@@ -2372,13 +2273,13 @@ const sky = (() => {
 
   let running = false, last = 0, odd = false;
   function wake() {
-    if (running || REDUCED || document.hidden || !(parts.length || snow)) return;   // snow lying still has to melt
+    if (running || REDUCED || document.hidden || !parts.length) return;
     running = true;
     last = performance.now();
     requestAnimationFrame(frame);
   }
   function frame(now) {
-    if (document.hidden || !(parts.length || snow)) {
+    if (document.hidden || !parts.length) {
       running = false;
       render();
       return;
@@ -2412,7 +2313,7 @@ const sky = (() => {
       drawBranch();
       for (const p of parts) {
         p.groundY = H - 3 - Math.random() * 14;
-        if (p.on === "ground") p.y = ground(p);
+        if (p.on === "ground") p.y = p.groundY;
       }
       render();
     });
