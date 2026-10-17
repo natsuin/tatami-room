@@ -85,7 +85,7 @@ button, input { font: inherit; color: inherit; }
 .sky-front { z-index: 9; width: 100%; height: 100%; }
 .sky canvas, .bough { position: absolute; inset: 0; width: 100%; height: 100%; }
 .bough { opacity: .78; transform-origin: 100% 10%; animation: sway 9s ease-in-out infinite alternate; }
-.sky.still .bough { animation: none; }
+.sky.still .bough, .sky.painted .bough { animation: none; }   /* a painting hangs still (a gust still shakes it) */
 #sky-branch { transform-origin: 100% 10%; }
 #sky-branch.shake { animation: bough-shake 1.4s ease-out; }
 @keyframes sway { from { rotate: -.4deg; } to { rotate: .5deg; } }
@@ -1977,16 +1977,17 @@ const sky = (() => {
     }
     return inkImgs[name];
   }
-  // Where this season's painting hangs, once it has loaded: from the right edge, as much of the window's
-  // width as it took of its sheet (a bit less), never taller than about half the sky under the bar, and
-  // never blown up much past its own size.
+  // Where this season's painting hangs, once it has loaded: from the right edge of the sky (left of a
+  // terminal panel), a little under the bar. Its size goes by the whole window, so opening a terminal
+  // only moves it over, unless the sky left is too narrow for it; never taller than about half the sky
+  // under the bar, and never blown up much past its own size.
   function inkPlace() {
     if (!prefs.ink || !prefs.branch) return null;
     const img = inkImg(prefs.season), at = INK[prefs.season];
     if (!img.complete || !img.naturalWidth) return null;
     const ratio = img.naturalHeight / img.naturalWidth;
-    const w = Math.min(VW * at.fw * .62, (H - top) * .55 / ratio, img.naturalWidth * 1.3), h = w * ratio;
-    return { img, x: VW - w, y: top - 6 + at.fy * H * .4, w, h };
+    const w = Math.min(W * at.fw * .62, VW * .8, (H - top) * .55 / ratio, img.naturalWidth * 1.3), h = w * ratio;
+    return { img, x: VW - w, y: top + 22 + at.fy * H * .4, w, h };
   }
   // Where a painting lets go of what falls: its pink blossom, red leaves or snow (anywhere painted, if none).
   const LETS_GO = { sakura: (r, g, b) => r > 170 && r - g > 30, momiji: (r, g, b) => r > 130 && r - g > 40,
@@ -2167,6 +2168,7 @@ const sky = (() => {
     x.setTransform(1, 0, 0, 1, 0, 0);
     x.clearRect(0, 0, cv.branch.width, cv.branch.height);
     blossoms = [];
+    $("#sky").classList.remove("painted");
     if (!prefs.branch) return;
     x.setTransform(k0, 0, 0, k0, 0, 0);
     if (prefs.ink && !inkImg(prefs.season).failed) {   // the painting, once it's here (it asks for a redraw then)
@@ -2174,6 +2176,7 @@ const sky = (() => {
       if (ink) {
         x.drawImage(ink.img, ink.x, ink.y, ink.w, ink.h);
         blossomsFrom(ink);
+        $("#sky").classList.add("painted");
       }
       return;
     }
