@@ -1542,7 +1542,8 @@ const resting = (s, to, near) => Math.abs(s.x - to) < near && Math.abs(s.v) < ne
 // the bar picks the season and how many fall, and the desk remembers.
 
 // Shapes a unit tall, pointing up: a sakura petal with the notch at its tip. A Japanese maple
-// leaf is seven pointed lobes meeting at (cx, cy), the middle one longest.
+// leaf is seven pointed lobes meeting at (cx, cy), the middle one longest; maple() is the neat,
+// even one a crest wears.
 const PETAL = new Path2D("M0 .5 C.46 .26 .44 -.3 .17 -.5 L0 -.38 L-.17 -.5 C-.44 -.3 -.46 .26 0 .5 Z");
 const MAPLE_LOBES = [[-122, .3], [-82, .42], [-40, .52], [0, .6], [40, .52], [82, .42], [122, .3]];
 function maple(size = 1, cx = 0, cy = .12) {
@@ -1554,7 +1555,39 @@ function maple(size = 1, cx = 0, cy = .12) {
   });
   return pts;
 }
-const MAPLE = new Path2D(`M${maple().map(([x, y]) => `${x.toFixed(3)} ${y.toFixed(3)}`).join(" L")} Z`);
+// A leaf as the painting has them, for what falls and the drawn branch: seven lobes spread round
+// like a star and joined well out from the middle, each widest a third of the way out and tapering
+// straight to a sharp point; a little uneven, and its stem bends. rnd picks this one's quirks, so no
+// two are quite alike.
+const LEAF_LOBES = [[-132, .33], [-88, .45], [-44, .55], [0, .6], [44, .55], [88, .45], [132, .33]];
+function mapleLeaf(rnd) {
+  const R = Math.PI / 180, at = (deg, r) => [Math.sin(deg * R) * r, .12 - Math.cos(deg * R) * r];
+  const lobes = LEAF_LOBES.map(([a, len]) => ({ a: a + (rnd() - .5) * 8, len: len * (.9 + rnd() * .16),
+                                                wide: .85 + rnd() * .3, bend: (rnd() - .5) * 12 }));
+  const clefts = [[-158, .06], ...lobes.slice(1).map((q, i) => {   // [angle, radius]; the outer two meet round the stem
+    const p = lobes[i];
+    return [(p.a + q.a) / 2, (.15 + rnd() * .04) * Math.min(p.len, q.len) / .42];
+  }), [158, .06]];
+  const leaf = new Path2D();
+  leaf.moveTo(...at(...clefts[0]));
+  lobes.forEach(({ a, len, wide, bend }, i) => {   // out from one cleft to the tip, and back in to the next
+    const [ca, ra] = clefts[i], [cb, rb] = clefts[i + 1], sa = (a - ca) * wide, sb = (cb - a) * wide;
+    leaf.bezierCurveTo(...at(a - sa * .75, ra + (len - ra) * .3), ...at(a - sa * .3 + bend * .5, ra + (len - ra) * .65),
+                       ...at(a + bend, len));
+    leaf.bezierCurveTo(...at(a + sb * .3 + bend * .5, rb + (len - rb) * .65), ...at(a + sb * .75, rb + (len - rb) * .3),
+                       ...at(cb, rb));
+  });
+  leaf.closePath();
+  const veins = new Path2D(), stem = new Path2D(), sway = (rnd() - .5) * .14;
+  for (const { a, len, bend } of lobes) {
+    veins.moveTo(0, .12);
+    veins.quadraticCurveTo(...at(a + bend * .3, len * .45), ...at(a + bend * .8, len * .8));
+  }
+  stem.moveTo(0, .1);
+  stem.quadraticCurveTo(-sway * .3, .3, sway, .44);
+  return { leaf, veins, stem };
+}
+const LEAVES = Array.from({ length: 12 }, (_, i) => mapleLeaf(seeded(7919 + i * 31)));
 const FLOWER = new Path2D();   // five sakura petals round a centre, for the branch
 for (let i = 0; i < 5; i++) FLOWER.addPath(PETAL, new DOMMatrix().rotate(i * 72).translate(0, -.55).scale(.9, 1.05));
 const FLOWER_TINTS = [   // edge, middle, eye
@@ -1619,7 +1652,7 @@ const sky = (() => {
 
   // A shape fills 70% of its sprite, leaving room to blur; big painted-size leaves get a finer one.
   const SPRITE = 64;
-  function sprite(shape, [h, s, l], { back = false, soft = false, px = SPRITE } = {}) {
+  function sprite(shape, [h, s, l], { back = false, soft = false, px = SPRITE, leaf = LEAVES[0] } = {}) {
     const c = document.createElement("canvas");
     c.width = c.height = px;
     const x = c.getContext("2d");
@@ -1647,21 +1680,25 @@ const sky = (() => {
       grad.addColorStop(1, hsl(3 - d));
     }
     x.fillStyle = grad;
-    x.fill(shape === "maple" ? MAPLE : PETAL);
-    if (shape === "maple") {   // its stem, and a vein down each lobe
+    if (shape === "maple") {   // a shade deeper toward its heart, its bent stem, and a vein down each lobe
+      if (back) x.scale(-1, 1);   // turned over, it's the same leaf the other way round
+      x.fill(leaf.leaf);
+      const heart = x.createRadialGradient(0, .12, 0, 0, .12, .42);
+      heart.addColorStop(0, hsl(-16, .5));
+      heart.addColorStop(1, hsl(-16, 0));
+      x.fillStyle = heart;
+      x.fill(leaf.leaf);
       x.lineCap = "round";
       x.strokeStyle = hsl(-20);
-      x.lineWidth = .035;
-      x.beginPath(); x.moveTo(0, .12); x.lineTo(.02, .5); x.stroke();
+      x.lineWidth = .026;
+      x.stroke(leaf.stem);
       x.strokeStyle = hsl(14, .4);
-      x.lineWidth = .016;
-      x.beginPath();
-      for (const [a, len] of MAPLE_LOBES) {
-        x.moveTo(0, .12);
-        x.lineTo(Math.sin(a * Math.PI / 180) * len * .8, .12 - Math.cos(a * Math.PI / 180) * len * .8);
-      }
-      x.stroke();
-    } else if (!back) {   // a faint vein down the middle of a petal
+      x.lineWidth = .014;
+      x.stroke(leaf.veins);
+      return c;
+    }
+    x.fill(PETAL);
+    if (!back) {   // a faint vein down the middle of a petal
       x.strokeStyle = `hsla(${h}, 100%, 98%, .5)`;
       x.lineWidth = .025;
       x.beginPath(); x.moveTo(0, .44); x.quadraticCurveTo(.03, .05, 0, -.3); x.stroke();
@@ -1672,13 +1709,15 @@ const sky = (() => {
   function dress() {
     season = SEASONS[prefs.season];
     const round = season.shape === "flake" || season.shape === "glow", px = season.painted ? SPRITE * 3 : SPRITE;
-    looks = season.tints.map((t) => {
+    const shapes = season.shape === "maple" ? 2 : 1;   // two leaves to each tint, every one its own shape
+    looks = season.tints.flatMap((t, i) => Array.from({ length: shapes }, (_, v) => {
+      const leaf = LEAVES[i * shapes + v];
       const pair = (soft) => {
-        const front = sprite(season.shape, t, { soft, px });
-        return { front, back: round ? front : sprite(season.shape, t, { back: true, soft, px }) };
+        const front = sprite(season.shape, t, { soft, px, leaf });
+        return { front, back: round ? front : sprite(season.shape, t, { back: true, soft, px, leaf }) };
       };
       return { sharp: pair(false), soft: pair(true) };
-    });
+    }));
     document.documentElement.dataset.season = prefs.season;
   }
 
@@ -2291,7 +2330,7 @@ const sky = (() => {
           const [h, s, l] = season.tints[(f.pick * season.tints.length) | 0];
           x.scale(f.r * 2, f.r * 2 * f.sq);
           x.fillStyle = `hsl(${h}, ${s}%, ${l - 4}%)`;
-          x.fill(MAPLE);
+          x.fill(LEAVES[(f.pick * LEAVES.length) | 0].leaf);
         } else if (f.pick < .12) plum(x, f);
         x.restore();
       }
