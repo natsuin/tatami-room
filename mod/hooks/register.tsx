@@ -1,7 +1,7 @@
 // Tatami Room inside Claude Code. Every few seconds the mod asks `tatami mod poll` how this
 // window's agent and its room are doing; the parts below draw from that. `tatami mod` runs as a
 // child of this Claude process, which is how it finds the window's agent.
-import { atom, read, update } from 'claude-code'
+import { atom, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Snapshot } from '../types'
@@ -18,6 +18,7 @@ const snap = atom({ plugin: 'tatami', key: 'snap' } as const, null)
 let wake = true // the "Wake for tasks and messages" option
 let polling = false
 let last = ''
+let tag: string | undefined
 
 /** 'Furina, Nahida, Raiden Shogun, Yae Miko' -> 'Furina, Nahida +2': whole names, kept short. */
 function people(names: string): string {
@@ -33,8 +34,7 @@ function people(names: string): string {
   return kept.join(', ') + (rest > 0 ? ` +${rest}` : '')
 }
 
-/** The window's name tag, dim at the right of the prompt footer: its desk name, who's in its
- * picture, and its room. ($.ui.status would pin it as an amber "⚠ tatami:" notice, like an error.) */
+/** The window's name tag on the status line: its desk name, who's in its picture, and its room. */
 export function nameTag(s: Snapshot): string | undefined {
   if (!s.id) {
     return undefined // a session without the Tatami Room channel
@@ -67,6 +67,11 @@ async function tick($: EngineInterface) {
       return
     }
     sawMail(s.unread)
+    const now = nameTag(s)
+    if (now !== tag) {
+      tag = now
+      $.ui.status(now)
+    }
     const shown = JSON.stringify({ ...s, wake: null })
     if (shown !== last) {
       last = shown
@@ -93,12 +98,6 @@ export const register: Register = (on, options) => {
     void tick($)
     $.clock.every(EVERY_MS, () => void tick($))
     return next(e)
-  })
-
-  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const s = await read($, snap)
-    const tag = s ? nameTag(s) : undefined
-    return next(tag ? { ...e, props: { ...e.props, modes: [...e.props.modes, tag] } } : e)
   })
 
   turn(on, glows)
