@@ -1582,11 +1582,11 @@ const sky = (() => {
   // painting, maple leaves fall as big as its painted ones (painted: their size then, at the
   // painting's own size), not the drawn branch's little ones. Snow lies about more than leaves or
   // petals: a room or card holds heap times as many flakes, more of them catch there and on the
-  // ground, and they stay stay times as long.
+  // ground, and they stay stay times as long. A maple leaf also swings as it falls (swing: how wide).
   const SEASONS = {
     sakura: { glyph: "桜", shape: "petal", count: 1, size: 1, fall: 1, spin: 1,
               tints: [[345, 100, 95], [340, 100, 92], [336, 95, 89], [332, 92, 86], [328, 85, 83], [350, 70, 94]] },
-    momiji: { glyph: "楓", shape: "maple", count: .55, size: 1.45, painted: 3.3, fall: 1.3, spin: .7,
+    momiji: { glyph: "楓", shape: "maple", count: .55, size: 1.45, painted: 3.3, fall: 1.3, spin: .7, swing: 1,
               tints: [[358, 80, 50], [8, 88, 54], [18, 92, 56], [28, 95, 58], [38, 95, 60], [345, 70, 42]] },
     yuki: { glyph: "雪", shape: "flake", count: 1.8, size: .5, fall: .6, spin: 0, glint: .25, heap: 3, stay: 4,
             tints: [[330, 60, 98], [250, 60, 97], [210, 70, 97]] },
@@ -1729,6 +1729,8 @@ const sky = (() => {
       x: 0, y: 0, vx: 0, vy: 0, fade: 1, squash: 1, life: Infinity, front: false,
       on: null, lx: 0, rest: 0, lands: false, groundY: H, retire: false,
       seed: Math.random() * 200, wander: 0, blink: Math.random() * TAU, blinkV: .2 + Math.random() * .45,
+      sw: Math.random() * TAU, swW: 1.5 + Math.random() * .9, swA: (16 + Math.random() * 14) * (season.swing || 0),
+      swR: .3 + Math.random() * .25,
       glint: layer === "mid" && Math.random() < (season.glint || 0), shine: 0, shineT: 9, shineAt: T + 2 + Math.random() * 48,
     };
     place(p, where);
@@ -1906,7 +1908,17 @@ const sky = (() => {
       const ty = (32 + (p.glide ? 46 * (1 - flat) : 0)) * p.d * p.fall + w * .06;
       p.vx += (tx - p.vx) * kx;
       p.vy += (ty - p.vy) * ky;
-      const ny = p.y + p.vy * dt;
+      // A maple leaf swings like a pendulum on top of that: side to side every few seconds, tipping
+      // into each swing and easing off at its ends, some swings wider than others as the air shifts.
+      let sx = 0, sy = 0;
+      if (p.swA) {
+        p.sw += p.swW * dt;
+        const a = p.swA * p.d * (.7 + .3 * noise(T * .13 + p.seed)), c = Math.cos(p.sw);
+        sx = a * p.swW * c;                            // so its x goes a·sin,
+        sy = -.4 * a * p.swW * Math.sin(2 * p.sw);     // its y rises .4a·sin² toward both ends,
+        p.rot -= p.swR * p.swW * c * dt;               // and it tips -swR·sin, outer edge up
+      }
+      const ny = p.y + (p.vy + sy) * dt;
       let caught = null;
       if (p.layer === "mid" && !p.front && p.vy > 0) {
         const L = ledges.find((l) => p.y <= l.top && ny >= l.top && p.x > l.left && p.x < l.right);
@@ -1915,7 +1927,7 @@ const sky = (() => {
       if (caught) {
         settle(p, caught.el, p.x - caught.x0);
       } else {
-        p.x += p.vx * dt;
+        p.x += (p.vx + sx) * dt;
         p.y = ny;
       }
       p.flipV += (p.spin - p.flipV) * dt * .6;
